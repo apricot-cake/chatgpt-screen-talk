@@ -1,0 +1,14 @@
+{
+  "name": "hoi4-play-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HOI4の共有画面を参照しながら音声で相談するローカルアプリ",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.cjs",
+    "check": "node scripts/check.cjs",
+    "test": "node --test test/*.test.cjs"
+  }
+}

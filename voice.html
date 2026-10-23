@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="ja">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  />
+  <title>HOI4 音声会話</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font:
+        16px/1.7 system-ui,
+        sans-serif;
+      background: #f5f5f3;
+      color: #202522;
+      margin: 0;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #f5f5f3;
+      border-bottom: 1px solid #d9ddd9;
+      padding: 12px 24px;
+    }
+    .header-row {
+      max-width: 660px;
+      margin: auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    main {
+      max-width: 708px;
+      margin: auto;
+      padding: 16px 24px 32px;
+    }
+    h1 {
+      font-size: 18px;
+      line-height: 1.3;
+      margin: 0;
+      white-space: nowrap;
+    }
+    button {
+      font: inherit;
+      font-size: 14px;
+      padding: 7px 12px;
+      border: 1px solid #777;
+      border-radius: 7px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #start {
+      background: #245441;
+      color: white;
+      border-color: #245441;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .controls {
+      display: flex;
+      flex-shrink: 0;
+      gap: 8px;
+    }
+    #state {
+      min-height: 2em;
+    }
+    #captions {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border-top: 1px solid #ccc;
+      padding-top: 16px;
+      scroll-margin-top: 76px;
+    }
+    small {
+      color: #555;
+    }
+    @media (max-width: 380px) {
+      header {
+        padding: 12px 16px;
+      }
+      h1 {
+        font-size: 15px;
+      }
+      button {
+        font-size: 13px;
+        padding: 7px 9px;
+      }
+      .header-row {
+        gap: 8px;
+      }
+      main {
+        padding-inline: 16px;
+      }
+    }
+  </style>
+  <header>
+    <div class="header-row">
+      <h1>HOI4 音声会話</h1>
+      <div class="controls">
+        <button id="start">会話を開始</button
+        ><button id="stop" disabled>終了</button>
+      </div>
+    </div>
+  </header>
+  <main>
+    <p>
+      マイクで質問し、音声で回答を聞きます。画面共有のタブは開いたままにしてください。ゲーム音は取得しません。
+    </p>
+    <p id="state" role="status">まだ接続していません。</p>
+    <audio id="reply" autoplay></audio>
+    <p id="captions" aria-live="polite"></p>
+    <p>
+      <small
+        >この会話はChatGPTログインを使う別の試験セッションです。ここでのチャット履歴は自動では引き継ぎません。会話中はマイク音声を送信し、画面についての質問に答える際は共有画像を参照します。音声での会話と共有画面の参照を確認済みです。</small
+      >
+    </p>
+  </main>
+  <script>
+    const start = document.querySelector("#start"),
+      stop = document.querySelector("#stop"),
+      state = document.querySelector("#state"),
+      captions = document.querySelector("#captions"),
+      audio = document.querySelector("#reply");
+    let pc,
+      mic,
+      eventSource,
+      poll,
+      active = false,
+      lastRole = "",
+      captionText = "",
+      generation = 0,
+      scrollFrame = null;
+    function caption(role, text, done = false) {
+      const label = role === "user" ? "あなた" : "AI";
+      if (lastRole !== role || done) {
+        captionText += (captionText ? "\n" : "") + label + "：";
+        lastRole = role;
+      }
+      captionText += text;
+      captions.textContent = captionText;
+      if (scrollFrame === null)
+        scrollFrame = requestAnimationFrame(() => {
+          scrollFrame = null;
+          captions.scrollIntoView({ block: "end", behavior: "auto" });
+        });
+    }
+    async function post(url, body) {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (!r.ok) throw Error(data.error || "接続できませんでした");
+      return data;
+    }
+    async function closeVoice() {
+      generation++;
+      clearInterval(poll);
+      eventSource?.close();
+      mic?.getTracks().forEach((t) => t.stop());
+      pc?.close();
+      audio.srcObject = null;
+      active = false;
+      start.disabled = false;
+      stop.disabled = true;
+      state.textContent = "会話を終了しました。";
+      await post("/voice/stop", {}).catch(() => {});
+    }
+    async function stats() {
+      if (!pc || pc.connectionState !== "connected") return;
+      const reports = [...(await pc.getStats())].map((x) => x[1]);
+      const inbound = reports.find(
+        (x) => x.type === "inbound-rtp" && x.kind === "audio",
+      );
+      window.voiceDiagnostics = {
+        connection: pc.connectionState,
+        channel: window.voiceChannel?.readyState,
+        remoteTrack: pc
+          .getReceivers()
+          .map((r) => ({
+            kind: r.track.kind,
+            muted: r.track.muted,
+            state: r.track.readyState,
+          })),
+        inbound: inbound
+          ? {
+              packets: inbound.packetsReceived,
+              bytes: inbound.bytesReceived,
+              samples: inbound.totalSamplesReceived,
+              energy: inbound.totalAudioEnergy,
+            }
+          : null,
+        audioPaused: audio.paused,
+        audioTime: audio.currentTime,
+      };
+      await post("/voice/diagnostics", window.voiceDiagnostics).catch(() => {});
+    }
+    start.addEventListener("click", async () => {
+      start.disabled = true;
+      stop.disabled = false;
+      state.textContent = "マイクの許可を確認しています…";
+      const gen = ++generation;
+      try {
+        mic = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+          video: false,
+        });
+        if (gen !== generation) {
+          mic.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        pc = new RTCPeerConnection();
+        mic.getAudioTracks().forEach((t) => pc.addTrack(t, mic));
+        pc.ontrack = (e) => {
+          audio.srcObject = new MediaStream([e.track]);
+          audio.play().catch(() => {
+            state.textContent =
+              "返答音声を再生するため、下の再生ボタンを押してください。";
+            audio.controls = true;
+          });
+        };
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === "connected") {
+            active = true;
+            state.textContent = "接続しました。マイクに話しかけてください。";
+            poll = setInterval(stats, 2000);
+          } else if (["failed", "disconnected"].includes(pc.connectionState)) {
+            state.textContent =
+              "接続が切れました。終了してから、もう一度開始してください。";
+          }
+        };
+        window.voiceChannel = pc.createDataChannel("oai-events");
+        voiceChannel.onmessage = (e) => {
+          try {
+            const x = JSON.parse(e.data);
+            if (x.type === "output_transcript.added")
+              caption("assistant", x.item?.text || "");
+            if (x.type === "input_transcript.added")
+              caption("user", x.item?.text || "");
+            if (x.type === "error")
+              state.textContent =
+                x.error?.message || "音声接続でエラーが発生しました。";
+          } catch {}
+        };
+        eventSource = new EventSource("/voice/events");
+        eventSource.onmessage = (e) => {
+          const x = JSON.parse(e.data);
+          if (x.type === "error" || x.type === "warning")
+            state.textContent = x.message;
+          if (x.type === "screen_read")
+            state.textContent = "共有画面を確認しました。";
+          if (x.type === "closed") closeVoice();
+        };
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await new Promise((r) => {
+          if (pc.iceGatheringState === "complete") r();
+          else {
+            pc.onicegatheringstatechange = () => {
+              if (pc.iceGatheringState === "complete") r();
+            };
+            setTimeout(r, 2000);
+          }
+        });
+        state.textContent = "音声に接続しています…";
+        const result = await post("/voice/start", {
+          sdp: pc.localDescription.sdp,
+        });
+        if (gen !== generation) return;
+        await pc.setRemoteDescription({ type: "answer", sdp: result.sdp });
+      } catch (e) {
+        const message =
+          e.name === "NotAllowedError"
+            ? "マイクは許可されませんでした。"
+            : e.message;
+        await closeVoice();
+        state.textContent = message;
+      }
+    });
+    stop.addEventListener("click", closeVoice);
+    window.addEventListener("pagehide", () => {
+      mic?.getTracks().forEach((t) => t.stop());
+      pc?.close();
+      navigator.sendBeacon("/voice/stop", "{}");
+    });
+  </script>
+</html>
