@@ -1,8 +1,8 @@
 {
-  "name": "hoi4-play-assistant",
+  "name": "chatgpt-screen-talk",
   "version": "0.1.0",
   "private": true,
-  "description": "HOI4の共有画面を参照しながら音声で相談するローカルアプリ",
+  "description": "共有画面を参照しながらChatGPTと音声で会話するローカルアプリ",
   "engines": {
     "node": ">=22"
   },

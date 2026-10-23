@@ -9,7 +9,7 @@ test(
   { timeout: 20000 },
   async (t) => {
     const dir = await fs.mkdtemp(
-      path.join(os.tmpdir(), "hoi4-play-assistant-"),
+      path.join(os.tmpdir(), "chatgpt-screen-talk-"),
     );
     const child = spawn(process.execPath, ["server.cjs"], {
       cwd: path.resolve(__dirname, ".."),
@@ -39,7 +39,7 @@ test(
     });
     assert.equal(new URL(base).hostname, "127.0.0.1");
     assert.equal((await fetch(base)).status, 200);
-    assert.match(await (await fetch(base + "/voice")).text(), /HOI4 音声会話/);
+    assert.match(await (await fetch(base + "/voice")).text(), /chatgpt-screen-talk/);
     assert.equal((await (await fetch(base + "/status")).json()).active, false);
     // A foreign web page must not start a microphone/backend session.
     assert.equal(
