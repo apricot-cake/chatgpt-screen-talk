@@ -1,4 +1,6 @@
 .data/
+dist/
+dist-tests/
 node_modules/
 .env
 .env.*
