@@ -27,7 +27,7 @@
 ### Windows
 
 1. [Node.js](https://nodejs.org/en/download)と[Codex CLI](https://learn.chatgpt.com/docs/enterprise/windows-deployment)を用意し、CodexでChatGPTにログインします。
-2. [Windows用ZIP](https://github.com/apricot-cake/chatgpt-screen-talk/releases/download/v0.1.0/chatgpt-screen-talk-v0.1.0-windows.zip)をダウンロードして展開します。
+2. [最新版のWindows用ZIP](https://github.com/apricot-cake/chatgpt-screen-talk/releases/latest/download/chatgpt-screen-talk-windows.zip)をダウンロードして展開します。
 3. 展開したフォルダーの `start.cmd` をダブルクリックします。
 
 初回は依存のインストールとビルドを行い、準備ができるとブラウザが開きます。2回目以降も同じファイルで起動でき、変更がなければ準備を省略します。必要な環境やログインが不足している場合は、その手順を表示します。
