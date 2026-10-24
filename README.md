@@ -4,9 +4,9 @@
 
 対応OS：Windows
 
-![共有したゲーム画面と攻略相談の会話を並べた利用画面の表示例](docs/images/screenshot.png)
+![Minecraftのゲーム画面とプレイ相談の会話を並べた利用画面の表示例](docs/images/screenshot.png)
 
-画像は、ゲーム画面と会話サンプルをアプリに表示した例です。
+画像は、[Minecraft公式のゲーム画面](https://www.minecraft.net/en-us/article/how-survive-your-first-night-minecraft)と会話サンプルをアプリに表示した例です。
 
 ## 主な機能
 
@@ -61,3 +61,5 @@
 ## ライセンス
 
 [MIT License](LICENSE)で公開しています。
+
+ゲーム画像の権利は各権利者に帰属します。
