@@ -172,18 +172,37 @@ test(
       ).status,
       415,
     );
-    const oversized = new Uint8Array(5 * 1024 * 1024 + 1);
-    oversized.set([255, 216]);
-    assert.equal(
-      (
-        await fetch(base + "/frame", {
+    // Content-Lengthで拒否されることを実HTTPで確認する。
+    // 本文を送信しないため、413と大容量uploadのsocket終了が競合しない。
+    const oversizedStatus = await new Promise<number>((resolve, reject) => {
+      const req = request(
+        base + "/frame",
+        {
           method: "POST",
-          headers: { Origin: base, "Content-Type": "image/jpeg" },
-          body: oversized,
-        })
-      ).status,
-      413,
-    );
+          agent: false,
+          headers: {
+            Origin: base,
+            "Content-Type": "image/jpeg",
+            "Content-Length": 5 * 1024 * 1024 + 1,
+            Connection: "close",
+          },
+        },
+        (response) => {
+          response.on("error", reject);
+          response.on("end", () => {
+            resolve(response.statusCode ?? 0);
+            req.destroy();
+          });
+          response.resume();
+        },
+      );
+      req.on("error", reject);
+      req.setTimeout(3000, () =>
+        req.destroy(new Error("画像サイズ制限の検証がタイムアウトしました")),
+      );
+      req.flushHeaders();
+    });
+    assert.equal(oversizedStatus, 413);
     assert.equal((await captureStatus(base)).active, false);
     const image = new Uint8Array([255, 216, 255, 217]);
     assert.equal(
