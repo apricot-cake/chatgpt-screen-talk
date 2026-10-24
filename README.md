@@ -29,6 +29,8 @@
 1. [最新版のZIP](https://github.com/apricot-cake/chatgpt-screen-talk/releases/latest/download/chatgpt-screen-talk-windows.zip)をダウンロードして展開します。
 2. 展開したフォルダーの `start.cmd` をダブルクリックします。
 
+Windowsで「発行元を確認できませんでした」と表示された場合は、[起動できない場合](docs/使い方.md#起動できない場合)をご確認ください。
+
 初回は、動作に必要なファイルをダウンロードして準備します。準備が終わるとブラウザが開きます。準備済みのファイルは、次回以降も使います。
 
 必要なソフトウェアやログインが不足している場合は、起動時に対処方法を表示します。
