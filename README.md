@@ -4,7 +4,9 @@
 
 対応OS：Windows
 
-![画面共有と音声会話を並べたアプリ画面](docs/images/screenshot.png)
+![共有したメモと会話の文字起こしを並べた利用画面の表示例](docs/images/screenshot.png)
+
+画像は、説明用の画面と会話サンプルをアプリに表示した例です。
 
 ## 主な機能
 
