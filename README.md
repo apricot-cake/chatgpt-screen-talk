@@ -6,8 +6,6 @@
 
 ![Minecraftのゲーム画面とプレイ相談の会話を並べた利用画面の表示例](docs/images/screenshot.png)
 
-画像は、[Minecraft公式のゲーム画面](https://www.minecraft.net/en-us/article/how-survive-your-first-night-minecraft)と会話サンプルをアプリに表示した例です。
-
 ## 主な機能
 
 - 共有した画面について、音声で質問できます。
