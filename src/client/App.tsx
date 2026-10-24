@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -146,9 +145,6 @@ export default function App() {
                   message={screenDetails}
                 />
               </CardTitle>
-              <CardDescription className="hidden md:block">
-                相談したい画面やウィンドウを選んでください。
-              </CardDescription>
             </CardHeader>
             <CardContent className="screen-content flex flex-1 flex-col gap-4">
               <div className="screen-preview relative flex aspect-video items-center justify-center overflow-hidden rounded-lg border bg-muted">
