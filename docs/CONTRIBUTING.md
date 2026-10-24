@@ -1,6 +1,20 @@
 # 開発ガイド
 
-必要な環境と起動方法は[README](../README.md#必要な環境)、環境変数とデータ保存先は[使い方](使い方.md)を参照してください。ターミナルからの初回準備は `npm ci --include=dev` で行います。
+必要な環境は[README](../README.md#必要な環境)、環境変数とデータ保存先は[使い方](使い方.md)を参照してください。
+
+## ターミナルから起動
+
+リポジトリを取得し、そのフォルダーで実行します。
+
+```sh
+git clone https://github.com/apricot-cake/chatgpt-screen-talk.git
+cd chatgpt-screen-talk
+codex login
+npm ci --include=dev
+npm start
+```
+
+`npm start` は型チェックとビルドを行ってからサーバーを起動します。表示される `http://127.0.0.1:ポート番号` をブラウザで開きます。実行ファイルの場所やポート番号を指定する場合は、[設定](使い方.md#設定)を参照してください。
 
 ## 構成
 

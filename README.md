@@ -26,8 +26,6 @@
 
 ## インストール・起動
 
-### ZIPから起動
-
 1. [Node.js](https://nodejs.org/en/download)と[Codex CLI](https://learn.chatgpt.com/docs/enterprise/windows-deployment)を用意し、CodexでChatGPTにログインします。
 2. [最新版のZIP](https://github.com/apricot-cake/chatgpt-screen-talk/releases/latest/download/chatgpt-screen-talk-windows.zip)をダウンロードして展開します。
 3. 展開したフォルダーの `start.cmd` をダブルクリックします。
@@ -35,20 +33,6 @@
 初回は依存のインストールとビルドを行い、準備ができるとブラウザが開きます。2回目以降も同じファイルで起動でき、変更がなければ準備を省略します。必要な環境やログインが不足している場合は、その手順を表示します。
 
 起動中のウィンドウは開いたままにしてください。終了する場合は `Ctrl+C` を押します。
-
-### ターミナルから起動
-
-リポジトリを取得し、そのフォルダーで実行します。
-
-```sh
-git clone https://github.com/apricot-cake/chatgpt-screen-talk.git
-cd chatgpt-screen-talk
-codex login
-npm ci --include=dev
-npm start
-```
-
-`npm start` は型チェックとビルドを行ってからサーバーを起動します。表示される `http://127.0.0.1:ポート番号` をブラウザで開きます。実行ファイルの場所やポート番号を指定する場合は、[設定](docs/使い方.md#設定)を参照してください。
 
 ## 使い方
 
