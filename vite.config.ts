@@ -1,15 +1,15 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("./src/client", import.meta.url)) },
+  },
   build: {
     outDir: "dist/client",
     emptyOutDir: true,
-    rolldownOptions: {
-      input: {
-        screen: fileURLToPath(new URL("./index.html", import.meta.url)),
-        voice: fileURLToPath(new URL("./voice.html", import.meta.url)),
-      },
-    },
   },
 });

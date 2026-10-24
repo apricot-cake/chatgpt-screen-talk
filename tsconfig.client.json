@@ -4,8 +4,12 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": [],
-    "noEmit": true
+    "types": ["vite/client"],
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": ["./src/client/*"]
+    }
   },
-  "include": ["src/client/**/*.ts", "src/shared/**/*.ts"]
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx", "src/shared/**/*.ts"]
 }

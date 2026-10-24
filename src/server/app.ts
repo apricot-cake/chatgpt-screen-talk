@@ -101,7 +101,8 @@ export async function createApp(options: AppOptions = {}) {
     dotfiles: "deny",
   });
 
-  app.get("/voice", (_request, reply) => reply.sendFile("voice.html"));
+  app.get("/voice", (_request, reply) => reply.redirect("/"));
+  app.get("/voice.html", (_request, reply) => reply.redirect("/"));
   app.get("/voice/status", () => getVoice().status());
   app.get("/voice/events", { sse: "only" }, async (_request, reply) => {
     reply.sse.keepAlive();

@@ -10,6 +10,7 @@ node_modules/
 *.wav
 *.jpg
 *.png
+!docs/images/*.png
 coverage/
 playwright-report/
 test-results/
