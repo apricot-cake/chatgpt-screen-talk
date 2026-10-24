@@ -426,7 +426,11 @@ export default function createVoice({
       );
       child = proc;
       readline.createInterface({ input: proc.stdout }).on("line", onLine);
-      proc.stderr.on("data", () => {});
+      // 生のstderrは認証情報や個人パスを含み得るため、診断用にのみ保持する。
+      let startupStderr = "";
+      proc.stderr.on("data", (chunk: Buffer) => {
+        startupStderr = (startupStderr + chunk.toString()).slice(-8192);
+      });
       proc.on("error", (error: Error) => {
         if (child !== proc) return;
         lastError = cleanText(error.message);
@@ -434,13 +438,20 @@ export default function createVoice({
         emit({ type: "error", message: lastError });
         void stop();
       });
-      proc.on("exit", () => {
+      proc.on("exit", (code, signal) => {
         if (child !== proc) return;
         child = null;
         threadId = null;
         auth = null;
         toolsEnabled = false;
-        failPending(new Error("音声サーバーが終了しました"));
+        const detail = /failed to initialize (?:sqlite )?state runtime/i.test(
+          startupStderr,
+        )
+          ? "Codexのローカル状態データベースを初期化できません。サーバーを制限付きサンドボックスの外で起動し、Codexのデータフォルダーへの書き込み権限を確認してください。"
+          : "音声サーバーが終了しました。";
+        lastError = `${detail}（終了コード: ${code ?? signal ?? "不明"}）`;
+        emit({ type: "error", message: lastError });
+        failPending(new Error(lastError));
         change("stopped");
       });
       await rpc("initialize", {

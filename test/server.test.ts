@@ -81,6 +81,11 @@ test(
     });
     assert.equal(new URL(base).hostname, "127.0.0.1");
     assert.equal((await fetch(base)).status, 200);
+    for (const legacyPath of ["/voice", "/voice.html"]) {
+      const legacy = await fetch(base + legacyPath, { redirect: "manual" });
+      assert.equal(legacy.status, 302);
+      assert.equal(legacy.headers.get("location"), "/");
+    }
     assert.match(
       await (await fetch(base + "/voice")).text(),
       /chatgpt-screen-talk/,
@@ -218,5 +223,56 @@ test(
     );
     assert.equal((await captureStatus(base)).active, false);
     assert.equal((await fetch(base + "/latest.jpg")).status, 404);
+  },
+);
+
+test(
+  "ランチャーの終了通知でHTTPサーバーが正常終了する",
+  { timeout: 15000 },
+  async (t) => {
+    const directory = await fs.mkdtemp(
+      path.join(os.tmpdir(), "chatgpt-screen-talk-ipc-"),
+    );
+    const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
+    const child = spawn(process.execPath, ["dist/server/server.js"], {
+      cwd: repoRoot,
+      env: { ...process.env, DATA_DIR: directory, PORT: "0" },
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+      windowsHide: true,
+    });
+    t.after(async () => {
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      await fs.rm(directory, { recursive: true, force: true });
+    });
+    assert.ok(child.stdout);
+    child.stderr?.resume();
+    const origin = await new Promise<string>((resolve, reject) => {
+      let output = "";
+      child.stdout?.on("data", (chunk: Buffer) => {
+        output += chunk.toString();
+        const url = output
+          .split(/\r?\n/)
+          .find((line) => /^http:\/\/127\.0\.0\.1:\d+$/.test(line));
+        if (url) resolve(url);
+      });
+      child.once("error", reject);
+      child.once("exit", (code) =>
+        reject(new Error(`起動前に終了しました: ${code}`)),
+      );
+    });
+    assert.equal((await fetch(origin)).status, 200);
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error("終了通知が処理されませんでした")),
+        4000,
+      );
+      child.once("exit", (code, signal) => {
+        clearTimeout(timeout);
+        if (code === 0 && signal === null) resolve();
+        else reject(new Error(`異常終了: ${code}/${signal}`));
+      });
+      child.send({ type: "launcher:shutdown" });
+    });
+    await assert.rejects(fetch(origin));
   },
 );

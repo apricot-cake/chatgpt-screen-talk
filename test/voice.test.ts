@@ -21,6 +21,7 @@ function record(value: unknown): JsonRecord {
 interface MockOptions {
   accountType?: string;
   unsupportedOptionalFields?: boolean;
+  stateRuntimeFailure?: boolean;
 }
 
 async function withMock(
@@ -65,6 +66,10 @@ const options = ${JSON.stringify(options)};
 const logPath = ${JSON.stringify(logPath)};
 const log = (value) => fs.appendFileSync(logPath, JSON.stringify(value) + "\\n");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+if (options.stateRuntimeFailure) {
+  process.stderr.write("Error: failed to initialize sqlite state runtime under PRIVATE-PATH secret@example.com sk-not-for-client\\n");
+  process.exit(1);
+}
 log({ event: "environment", platformKeysPresent: ["OPENAI_API_KEY", "AZURE_OPENAI_API_KEY", "CODEX_API_KEY"].some((key) => key in process.env) });
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
@@ -204,6 +209,27 @@ test(
         entries.some((entry) => entry.method === "thread/realtime/start"),
         false,
       );
+    });
+  },
+);
+
+test(
+  "Codexの状態DB初期化失敗では権限の原因を示し生stderrを返さない",
+  { concurrency: false, timeout: 15000 },
+  async () => {
+    await withMock({ stateRuntimeFailure: true }, async (voice) => {
+      await assert.rejects(voice.start("v=0\r\n"), (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /ローカル状態データベース/);
+        assert.match(error.message, /終了コード: 1/);
+        assert.doesNotMatch(
+          error.message,
+          /PRIVATE-PATH|secret@example|sk-not-for-client/,
+        );
+        return true;
+      });
+      assert.equal(voice.status().state, "stopped");
+      assert.equal(voice.status().auth, null);
     });
   },
 );

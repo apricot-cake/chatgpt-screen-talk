@@ -23,12 +23,35 @@ try {
   process.exitCode = 1;
 }
 
+let closing = false;
+function shutdown(): void {
+  if (closing) return;
+  closing = true;
+  const timeout = setTimeout(() => process.exit(0), 6000);
+  timeout.unref();
+  const finish = () => {
+    clearTimeout(timeout);
+    if (process.connected) process.disconnect();
+  };
+  void app.close().then(finish, (error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+    finish();
+  });
+}
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    const timeout = setTimeout(() => process.exit(0), 6000);
-    timeout.unref();
-    void app.close().then(() => {
-      clearTimeout(timeout);
-    });
+  process.once(signal, shutdown);
+}
+
+if (process.connected) {
+  process.on("message", (message: unknown) => {
+    if (
+      typeof message === "object" &&
+      message !== null &&
+      "type" in message &&
+      message.type === "launcher:shutdown"
+    )
+      shutdown();
   });
 }
