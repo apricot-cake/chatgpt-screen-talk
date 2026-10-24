@@ -9,10 +9,10 @@
   },
   "scripts": {
     "start": "npm run build && node dist/server/server.js",
-    "check": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json && tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.tools.json",
+    "check": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json && tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.tools.json && tsc -p tsconfig.launcher.json",
     "build": "npm run check && vite build && tsc -p tsconfig.server.json",
     "pretest": "npm run build",
-    "test": "tsc -p tsconfig.test.json && node --test dist-tests/test/*.test.js"
+    "test": "tsc -p tsconfig.test.json && node --test dist-tests/test/*.test.js test/launcher.test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
