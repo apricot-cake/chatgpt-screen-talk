@@ -177,7 +177,7 @@ export function authenticate(executable, options) {
         params: {
           clientInfo: {
             name: "chatgpt-screen-talk-launcher",
-            version: "0.1.0",
+            version: "0.1.1",
           },
         },
       }) + "\n",
