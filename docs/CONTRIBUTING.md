@@ -32,6 +32,7 @@ Codexの実行ファイルやポート番号を指定する方法は、[設定](
 | `src/client/components/`、`src/client/index.css`、`src/client/lib/` | UIの部品、スタイル、共通処理                                  |
 | `src/server/server.ts`、`src/server/app.ts`                         | サーバーの起動、HTTP API、共有画像と状態の保存、SSEによる通知 |
 | `src/server/voice.ts`                                               | Codex App Serverとの認証・音声接続、共有画像の取得ツール      |
+| `src/server/voice-security.ts`                                      | Codexの対応バージョン、機能・ツール・指示の継承範囲の制限     |
 | `src/shared/contracts.ts`                                           | TypeBoxによる通信データの検証と型定義                         |
 | `start.cmd`、`scripts/start.mjs`                                    | ダブルクリックでの起動、環境確認、初回準備、ブラウザ表示      |
 | `vite.config.ts`、`tsconfig*.json`                                  | ビルドと型チェックの設定                                      |
@@ -40,6 +41,14 @@ Codexの実行ファイルやポート番号を指定する方法は、[設定](
 画面共有と音声会話は同じページで使います。それぞれ個別に開始・停止できます。以前の音声ページ `/voice` と `/voice.html` へのアクセスは、現在のページ `/` にリダイレクトします。
 
 起動用の `scripts/start.mjs` は、依存パッケージを導入する前にも動くよう、Node.jsで直接実行できるJavaScriptで記述しています。`package-lock.json` とソースの変更を確認し、必要な場合だけ依存パッケージの導入とビルドを行います。
+
+### 音声セッションの権限
+
+AIに渡すツールは、共有画像を取得する `get_shared_screen` だけです。コマンド実行などの組み込みツール、MCP、通知コマンドは無効にします。
+
+作業フォルダーの指示や個人用のskillsなどは引き継ぎません。ただし、Codexの共通指示（`CODEX_HOME`の`AGENTS.md`）は音声会話にも適用されます。共通指示によってツールや権限が追加されることはありません。
+
+接続前に対応バージョンと実効設定を確認します。制限を確認できない場合や、共有画像ツールが使えない場合は接続を開始しません。Codexの設定ファイルは書き換えません。
 
 ## 検証
 

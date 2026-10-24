@@ -19,8 +19,10 @@
 次のものを事前に用意してください。
 
 - [Node.js](https://nodejs.org/en/download) 22.12以降
-- [Codex CLI](https://learn.chatgpt.com/docs/enterprise/windows-deployment)と、CodexでのChatGPTログイン
+- [Codex CLI](https://learn.chatgpt.com/docs/enterprise/windows-deployment) `0.164.0-alpha.11.1` と、CodexでのChatGPTログイン
 - ChromeまたはEdge
+
+Codexは上記のバージョンに限定しています。[バージョンの確認と導入方法](docs/使い方.md#codexのバージョンが異なる場合)をご確認ください。
 
 このアプリは、CodexにログインしているChatGPTアカウントを使います。OpenAI APIキーへの切り替えは行いません。
 

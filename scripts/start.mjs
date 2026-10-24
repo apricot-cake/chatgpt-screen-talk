@@ -9,7 +9,7 @@ import readline from "node:readline";
 
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const installationHelp =
-  "Codex CLIが必要です。公式手順: https://learn.chatgpt.com/docs/enterprise/windows-deployment\nNode.js/npmがある場合: npm install -g @openai/codex";
+  "Codex CLIが必要です。公式手順: https://learn.chatgpt.com/docs/enterprise/windows-deployment\nNode.js/npmがある場合: npm install -g @openai/codex@0.164.0-alpha.11.1";
 /** @typedef {{command:string,prefix:string[]}} Command */
 /** @typedef {{cwd:string,env:NodeJS.ProcessEnv}} RunOptions */
 /** @typedef {'chatgpt'|'apiKey'|'none'} Auth */

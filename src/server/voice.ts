@@ -3,6 +3,7 @@ import readline from "node:readline";
 import fs from "node:fs";
 import path from "node:path";
 import { ScreenToolInputSchema } from "../shared/contracts.js";
+import { prepareVoiceRuntime, type VoiceRuntime } from "./voice-security.js";
 
 export interface SharedFrame {
   bytes: Buffer;
@@ -145,6 +146,8 @@ export default function createVoice({
   const pending = new Map<RpcId, PendingRequest>();
   const listeners = new Set<(event: VoiceEvent) => void>();
   let sdpWaiter: SdpWaiter | null = null;
+  let runtime: VoiceRuntime | null = null;
+  let generation = 0;
 
   function emit(event: VoiceEvent): void {
     for (const listener of listeners) {
@@ -196,10 +199,20 @@ export default function createVoice({
     sdpWaiter?.reject(error);
     sdpWaiter = null;
   }
-  async function tool(id: RpcId, params: JsonRecord): Promise<void> {
+  async function tool(
+    source: ChildProcessWithoutNullStreams,
+    sourceGeneration: number,
+    id: RpcId,
+    params: JsonRecord,
+  ): Promise<void> {
+    const current = () =>
+      child === source && generation === sourceGeneration &&
+      state !== "stopping" && state !== "stopped";
+    if (!current()) return;
+    const name = typeof params.tool === "string" ? params.tool : params.name;
     if (
-      params.tool !== "get_shared_screen" &&
-      params.name !== "get_shared_screen"
+      name !== "get_shared_screen" ||
+      (params.name !== undefined && params.name !== name)
     ) {
       send({
         id,
@@ -223,6 +236,7 @@ export default function createVoice({
           timer.unref();
         }),
       ]);
+      if (!current()) return;
       if (!frame?.bytes.length) {
         send({
           id,
@@ -259,6 +273,7 @@ export default function createVoice({
       });
       emit({ type: "screen_read", at: cleanText(frame.at) });
     } catch (error) {
+      if (!current()) return;
       try {
         send({
           id,
@@ -274,7 +289,12 @@ export default function createVoice({
       }
     }
   }
-  function onLine(line: string): void {
+  function onLine(
+    source: ChildProcessWithoutNullStreams,
+    sourceGeneration: number,
+    line: string,
+  ): void {
+    if (child !== source || generation !== sourceGeneration) return;
     let value: unknown;
     try {
       value = JSON.parse(line);
@@ -302,7 +322,7 @@ export default function createVoice({
         return;
       }
       if (message.method === "item/tool/call")
-        void tool(id, record(message.params));
+        void tool(source, sourceGeneration, id, record(message.params));
       else {
         try {
           send({
@@ -367,6 +387,8 @@ export default function createVoice({
       return status();
     change("stopping");
     const proc = child;
+    const previousRuntime = runtime;
+    runtime = null;
     if (proc && threadId) {
       try {
         await rpc("thread/realtime/stop", { threadId }, 3000);
@@ -374,6 +396,7 @@ export default function createVoice({
         /* 終了を続ける。 */
       }
     }
+    ++generation;
     failPending(new Error("音声接続を終了しました"));
     child = null;
     threadId = null;
@@ -386,6 +409,7 @@ export default function createVoice({
     } catch {
       /* 終了済みの場合は無視。 */
     }
+    await previousRuntime?.dispose().catch(() => {});
     change("stopped");
     return status();
   }
@@ -403,6 +427,7 @@ export default function createVoice({
     limits = null;
     auth = null;
     change("starting");
+    const startingGeneration = ++generation;
     const env = { ...process.env };
     for (const key of Object.keys(env)) {
       if (/^(OPENAI_API_KEY|AZURE_OPENAI_API_KEY|CODEX_API_KEY)$/.test(key))
@@ -410,22 +435,26 @@ export default function createVoice({
     }
     try {
       const executable = codexCommand(env);
+      const prepared = await prepareVoiceRuntime(executable, env);
+      if (generation !== startingGeneration || status().state !== "starting") {
+        await prepared.dispose();
+        throw new Error("音声接続が中断されました");
+      }
+      runtime = prepared;
       const proc = spawn(
         executable.command,
-        [
-          ...executable.prefix,
-          "app-server",
-          "--enable",
-          "realtime_conversation",
-        ],
+        [...executable.prefix, ...prepared.args],
         {
           env,
+          cwd: prepared.cwd,
           windowsHide: true,
           stdio: ["pipe", "pipe", "pipe"],
         },
       );
       child = proc;
-      readline.createInterface({ input: proc.stdout }).on("line", onLine);
+      readline.createInterface({ input: proc.stdout }).on("line", (line) =>
+        onLine(proc, startingGeneration, line),
+      );
       // 生のstderrは認証情報や個人パスを含み得るため、診断用にのみ保持する。
       let startupStderr = "";
       proc.stderr.on("data", (chunk: Buffer) => {
@@ -444,6 +473,8 @@ export default function createVoice({
         threadId = null;
         auth = null;
         toolsEnabled = false;
+        if (runtime === prepared) runtime = null;
+        void prepared.dispose().catch(() => {});
         const detail = /failed to initialize (?:sqlite )?state runtime/i.test(
           startupStderr,
         )
@@ -455,10 +486,13 @@ export default function createVoice({
         change("stopped");
       });
       await rpc("initialize", {
-        clientInfo: { name: "chatgpt-screen-talk", version: "0.1.0" },
+        clientInfo: { name: "chatgpt-screen-talk", version: "0.1.1" },
         capabilities: { experimentalApi: true },
       });
       send({ method: "initialized" });
+      const threadConfig = prepared.threadConfig(
+        await rpc("config/read", { includeLayers: false, cwd: prepared.cwd }),
+      );
       const account = record(await rpc("account/read"));
       if (record(account.account).type !== "chatgpt")
         throw new Error(
@@ -483,43 +517,34 @@ export default function createVoice({
       }
       const base = {
         ephemeral: true,
-        cwd,
+        cwd: prepared.cwd,
         approvalPolicy: "never",
         sandbox: "read-only",
         baseInstructions: INSTRUCTIONS,
+        developerInstructions: "",
+        config: threadConfig,
       };
-      let thread: unknown;
-      try {
-        thread = await rpc("thread/start", {
-          ...base,
-          dynamicTools: [
-            {
-              type: "function",
-              name: "get_shared_screen",
-              description:
-                "ユーザーが共有中の画面の最新画像を取得する。読み取り専用。",
-              inputSchema: ScreenToolInputSchema,
-            },
-          ],
-        });
-        toolsEnabled = true;
-      } catch (error) {
-        if (
-          !/invalid|unknown|unsupported|dynamic|schema/i.test(
-            errorMessage(error),
-          )
-        )
-          throw error;
-        thread = await rpc("thread/start", base);
-        emit({
-          type: "warning",
-          message: "画面取得ツールを登録できず、音声のみで接続します。",
-        });
-      }
+      const thread = await rpc("thread/start", {
+        ...base,
+        dynamicTools: [
+          {
+            type: "function",
+            name: "get_shared_screen",
+            description:
+              "ユーザーが共有中の画面の最新画像を取得する。読み取り専用。",
+            inputSchema: ScreenToolInputSchema,
+          },
+        ],
+      });
       const receivedThreadId = record(record(thread).thread).id;
       if (typeof receivedThreadId !== "string" || !receivedThreadId)
         throw new Error("音声スレッドの応答が無効です");
       threadId = receivedThreadId;
+      prepared.assertUnchanged(
+        await rpc("config/read", { includeLayers: false, cwd: prepared.cwd }),
+        threadConfig,
+      );
+      toolsEnabled = true;
       const params = {
         threadId,
         outputModality: "audio",
@@ -527,20 +552,10 @@ export default function createVoice({
         transport: { type: "webrtc", sdp },
         includeStartupContext: false,
       };
-      try {
-        await rpc("thread/realtime/start", {
-          ...params,
-          initialItems: [{ role: "developer", text: INSTRUCTIONS }],
-        });
-      } catch (error) {
-        if (
-          !/invalid|unknown|unsupported|initial|schema/i.test(
-            errorMessage(error),
-          )
-        )
-          throw error;
-        await rpc("thread/realtime/start", params);
-      }
+      await rpc("thread/realtime/start", {
+        ...params,
+        initialItems: [{ role: "developer", text: INSTRUCTIONS }],
+      });
       if (!answer) {
         await new Promise<string>((resolve, reject) => {
           const timer = setTimeout(() => {
@@ -564,6 +579,8 @@ export default function createVoice({
       change("active");
       return { sdp: answer, ...status() };
     } catch (error) {
+      if (generation !== startingGeneration)
+        throw new Error("音声接続が中断されました");
       lastError = cleanText(errorMessage(error));
       emit({ type: "error", message: lastError });
       await stop();
