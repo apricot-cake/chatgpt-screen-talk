@@ -9,7 +9,7 @@
 | `src/server/server.ts` | ローカルサーバーの起動 |
 | `src/server/app.ts` | FastifyのAPI、共有画像と状態の保存、SSE |
 | `src/server/voice.ts` | Codex App Serverとの認証・音声接続、共有画像の取得ツール |
-| `start.cmd`、`scripts/start.mjs` | Windowsの起動入口、環境確認、初回準備とブラウザ表示 |
+| `start.cmd`、`scripts/start.mjs` | ダブルクリックでの起動、環境確認、初回準備とブラウザ表示 |
 | `src/client/main.tsx`、`index.html` | Reactの起動と単一ページの入口 |
 | `src/client/App.tsx` | 画面共有・音声会話・文字起こしの画面 |
 | `src/client/hooks/useScreenShare.ts` | 画面共有の開始・停止と画像更新 |
