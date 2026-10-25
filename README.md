@@ -1,8 +1,6 @@
 # chatgpt-screen-talk
 
-画面を共有しながら、ChatGPTと音声で会話できるアプリです。お使いのPCで起動し、ブラウザから利用します。
-
-対応OS：Windows
+画面を共有しながら、ChatGPTと音声で会話できるWindows向けアプリです。お使いのPCで起動し、ブラウザから利用します。
 
 ![Minecraftのゲーム画面と音声会話を並べた利用画面の表示例](docs/images/screenshot.png)
 
