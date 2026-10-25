@@ -1,28 +1,27 @@
 # chatgpt-screen-talk
 
-画面を共有しながら、ChatGPTと音声で相談できるアプリです。お使いのPCで起動し、ブラウザから利用します。
+画面を共有しながら、ChatGPTと音声で会話できるアプリです。お使いのPCで起動し、ブラウザから利用します。
 
 対応OS：Windows
 
-![Minecraftのゲーム画面とプレイ相談の会話を並べた利用画面の表示例](docs/images/screenshot.png)
+![Minecraftのゲーム画面と音声会話を並べた利用画面の表示例](docs/images/screenshot.png)
 
 ## 主な機能
 
 - 共有した画面について、音声で質問できます。
-- 会話の内容を文字でも確認できます。
-- 画面共有と音声会話を同じタブで操作し、それぞれ開始・停止できます。
+- 画面共有と音声会話は、ブラウザ上で開始・停止できます。
 
-画面のクリックやキー入力を代わりに行う機能はありません。共有したアプリの音声も取得しません。
+共有したアプリの音声は取得しません。
 
 ## 必要な環境
 
 次のものを事前に用意してください。
 
 - [Node.js](https://nodejs.org/en/download) 22.12以降
-- [Codex CLI](https://learn.chatgpt.com/docs/enterprise/windows-deployment) `0.164.0-alpha.11.1` と、CodexでのChatGPTログイン
+- [Codex CLI](https://learn.chatgpt.com/docs/enterprise/windows-deployment) と、CodexでのChatGPTログイン
 - ChromeまたはEdge
 
-Codexは上記のバージョンに限定しています。[バージョンの確認と導入方法](docs/使い方.md#codexのバージョンが異なる場合)をご確認ください。
+Codex CLIは `0.164.0-alpha.11.1` で動作確認しています。他のバージョンは未確認です。現在の実装では、権限設定の確認対象をこのバージョンに絞り、それ以外では音声接続を開始しません。[バージョンの確認と導入方法](docs/使い方.md#codexのバージョンが異なる場合)をご確認ください。
 
 このアプリは、CodexにログインしているChatGPTアカウントを使います。OpenAI APIキーへの切り替えは行いません。
 
@@ -41,7 +40,7 @@ Windowsで「発行元を確認できませんでした」と表示された場�
 
 ## 使い方
 
-1. 「画面を共有」を押し、相談したい画面やウィンドウを選びます。
+1. 「画面を共有」を押し、会話で使う画面やウィンドウを選びます。
 2. 「会話を開始」を押し、ブラウザにマイクの利用を許可します。
 3. 共有したアプリに戻り、「今の画面を見て」などと話しかけます。
 
@@ -60,8 +59,8 @@ Windowsで「発行元を確認できませんでした」と表示された場�
 
 質問や不具合の報告、改善の提案は[GitHub Issues](https://github.com/apricot-cake/chatgpt-screen-talk/issues)へお寄せください。コードの変更を提案する場合は、プルリクエストを作成してください。
 
+脆弱性の報告は、[非公開の報告フォーム](https://github.com/apricot-cake/chatgpt-screen-talk/security/advisories/new)をご利用ください。
+
 ## ライセンス
 
 [MIT License](LICENSE)で公開しています。
-
-ゲーム画像の権利は各権利者に帰属します。
