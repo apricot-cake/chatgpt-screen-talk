@@ -13,15 +13,11 @@
 
 ## 必要な環境
 
-次のものを事前に用意してください。
-
 - [Node.js](https://nodejs.org/en/download) 22.12以降
-- [Codex CLI](https://learn.chatgpt.com/docs/enterprise/windows-deployment) と、CodexでのChatGPTログイン
+- [Codex CLI `0.164.0-alpha.11.1`](docs/利用ガイド.md#codexのバージョンが異なる場合) と、CodexでのChatGPTログイン
 - ChromeまたはEdge
 
-Codex CLIは `0.164.0-alpha.11.1` で動作確認しています。他のバージョンは未確認です。現在は権限設定を確認できるこの版でのみ音声接続を開始します。[バージョンの確認と導入方法](docs/利用ガイド.md#codexのバージョンが異なる場合)をご確認ください。
-
-このアプリは、CodexにログインしているChatGPTアカウントのサブスクリプションに含まれる利用枠を使います。OpenAI APIの従量課金は使いません。
+音声会話には、ChatGPTのサブスクリプションに含まれる利用枠を使います。
 
 ## インストール・起動
 
