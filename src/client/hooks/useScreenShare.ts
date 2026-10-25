@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { apiFetch } from "../lib/local-api";
 
 type Phase = "idle" | "selecting" | "sharing" | "stopping";
 interface CaptureController {
@@ -42,7 +43,7 @@ export function useScreenShare() {
       setError(null);
       setMessage("画面共有を停止しました。");
     }
-    await fetch("/stop", { method: "POST" }).catch(() => {});
+    await apiFetch("/stop", { method: "POST", keepalive: true }).catch(() => {});
     if (c.generation === gen) {
       c.phase = "idle";
       if (mounted.current) setPhase("idle");
@@ -122,7 +123,7 @@ export function useScreenShare() {
           if (!blob) throw new Error("画像を取得できませんでした。");
           const upload = new AbortController();
           c.upload = upload;
-          const response = await fetch("/frame", {
+          const response = await apiFetch("/frame", {
             method: "POST",
             headers: {
               "Content-Type": "image/jpeg",
@@ -186,7 +187,7 @@ export function useScreenShare() {
       const wasActive = current.current.phase !== "idle";
       release();
       current.current.phase = "idle";
-      if (wasActive) navigator.sendBeacon("/stop");
+      if (wasActive) void apiFetch("/stop", { method: "POST", keepalive: true }).catch(() => {});
     };
     const restore = (event: PageTransitionEvent) => {
       if (!event.persisted) return;

@@ -12,6 +12,13 @@ import {
   type CaptureStatus,
 } from "../shared/contracts.js";
 import createVoice, { type VoiceService } from "./voice.js";
+import { createLocalAuth, type LocalAuth } from "./local-auth.js";
+
+declare module "fastify" {
+  interface FastifyContextConfig {
+    public?: boolean;
+  }
+}
 
 const MAX_FRAME_BYTES = 5 * 1024 * 1024;
 const appRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -20,9 +27,11 @@ export interface AppOptions {
   dataDir?: string;
   clientDir?: string;
   voice?: VoiceService;
+  auth?: LocalAuth;
 }
 
 export async function createApp(options: AppOptions = {}) {
+  const auth = options.auth ?? createLocalAuth();
   const dataDir = path.resolve(
     options.dataDir || process.env.DATA_DIR || path.join(appRoot, ".data"),
   );
@@ -51,12 +60,13 @@ export async function createApp(options: AppOptions = {}) {
 
   app.addHook("onRequest", async (request, reply) => {
     reply.header("Cache-Control", "no-store");
+    reply.header("Referrer-Policy", "no-referrer");
     const address = app.server.address();
     if (!address || typeof address === "string") {
       return reply.code(503).send({ error: "サーバーが起動していません" });
     }
     const origin = `http://127.0.0.1:${address.port}`;
-    const pathname = new URL(request.url, origin).pathname;
+    const pathname = request.routeOptions.url;
     if (request.headers.host !== new URL(origin).host)
       return reply.code(403).send();
     if (request.method === "POST" && request.headers.origin !== origin) {
@@ -69,6 +79,15 @@ export async function createApp(options: AppOptions = {}) {
           request.headers.origin !== origin))
     )
       return reply.code(403).send();
+    if (
+      !request.routeOptions.config.public &&
+      !auth.accepts(request.headers.authorization)
+    ) {
+      return reply
+        .code(401)
+        .header("WWW-Authenticate", 'Bearer realm="screen-talk"')
+        .send({ error: "起動時に表示されたURLからアプリを開いてください。" });
+    }
     if (
       request.method === "POST" &&
       pathname === "/frame" &&
@@ -95,14 +114,18 @@ export async function createApp(options: AppOptions = {}) {
     },
   );
   await app.register(fastifySSE, { heartbeatInterval: 15_000 });
-  await app.register(staticFiles, {
-    root: options.clientDir || path.join(appRoot, "dist/client"),
-    index: "index.html",
-    dotfiles: "deny",
+  await app.register(async (publicApp) => {
+    publicApp.addHook("onRoute", (route) => {
+      route.config = { ...route.config, public: true };
+    });
+    await publicApp.register(staticFiles, {
+      root: options.clientDir || path.join(appRoot, "dist/client"),
+      index: "index.html",
+      dotfiles: "deny",
+    });
+    publicApp.get("/voice", (_request, reply) => reply.redirect("/"));
+    publicApp.get("/voice.html", (_request, reply) => reply.redirect("/"));
   });
-
-  app.get("/voice", (_request, reply) => reply.redirect("/"));
-  app.get("/voice.html", (_request, reply) => reply.redirect("/"));
   app.get("/voice/status", () => getVoice().status());
   app.get("/voice/events", { sse: "only" }, async (_request, reply) => {
     reply.sse.keepAlive();

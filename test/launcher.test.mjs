@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { launch } from "../scripts/start.mjs";
+import { launch, serve, openBrowser } from "../scripts/start.mjs";
 
 /** @param {(fixture: Awaited<ReturnType<typeof createFixture>>)=>Promise<void>} run */
 async function fixture(run) {
@@ -81,6 +81,45 @@ async function createFixture() {
     },
   };
 }
+
+test("認証付き起動URLを開き、HTTP確認には認証情報を含めない", async (t) => {
+  t.mock.method(console, "log", () => {});
+  await fixture(async ({ rootDir, options }) => {
+    const startupUrl = "http://127.0.0.1:51234/#token=" + "a".repeat(43);
+    await fs.mkdir(path.join(rootDir, "dist/server"), { recursive: true });
+    await fs.writeFile(
+      path.join(rootDir, "dist/server/server.js"),
+      `console.log(${JSON.stringify(startupUrl)}); setTimeout(() => {}, 1000);`,
+    );
+    let opened = false;
+    let checked = false;
+    await serve({
+      rootDir,
+      env: options.env ?? {},
+      fetchImpl: async (url) => {
+        assert.equal(url, new URL(startupUrl).origin);
+        checked = true;
+        return new Response("ready", { status: 200 });
+      },
+      openBrowser: async (url) => {
+        assert.equal(checked, true);
+        assert.equal(url, startupUrl);
+        opened = true;
+      },
+    });
+    assert.equal(opened, true);
+  });
+});
+
+test("外部URLや認証情報のない起動URLをブラウザへ渡さない", async () => {
+  for (const url of [
+    "https://example.invalid/#token=" + "a".repeat(43),
+    "http://127.0.0.1:51234/",
+    "http://127.0.0.1:51234/#token=invalid",
+    "http://127.0.0.1:51234/#token=" + "a".repeat(43) + ";calc",
+  ])
+    await assert.rejects(openBrowser(url), /起動先URLが無効/);
+});
 
 test("未認証とAPI認証では準備・起動せず既存認証を変更しない", async () => {
   await fixture(async ({ options, calls }) => {

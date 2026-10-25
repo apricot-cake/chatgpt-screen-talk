@@ -214,7 +214,7 @@ async function sourceHash(root) {
 }
 /** @param {string} url @returns {Promise<void>} */
 export function openBrowser(url) {
-  if (!/^http:\/\/127\.0\.0\.1:\d+\/?$/.test(url))
+  if (!/^http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]{43}$/.test(url))
     return Promise.reject(new Error("起動先URLが無効です"));
   // URLは検証済みの引数として渡し、シェル用コマンドへ連結しない。
   return new Promise((resolve, reject) => {
@@ -287,7 +287,7 @@ export async function serve({
       );
       lines.on("line", (line) => {
         console.log(line);
-        if (/^http:\/\/127\.0\.0\.1:\d+$/.test(line)) {
+        if (/^http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]{43}$/.test(line)) {
           clearTimeout(timeout);
           resolve(line);
         }
@@ -299,7 +299,7 @@ export async function serve({
     });
     if (typeof url !== "string")
       throw new Error("サーバーURLを取得できませんでした。");
-    const response = await fetchImpl(url, {
+    const response = await fetchImpl(new URL(url).origin, {
       signal: AbortSignal.timeout(10000),
     });
     if (response.status !== 200 || child.exitCode !== null)

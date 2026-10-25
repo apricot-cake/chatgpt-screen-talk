@@ -14,8 +14,11 @@ interface CaptureStatus {
   lastFrameAt: string | null;
 }
 
-async function captureStatus(base: string): Promise<CaptureStatus> {
-  const response = await fetch(base + "/status");
+async function captureStatus(
+  base: string,
+  sessionFetch: typeof fetch,
+): Promise<CaptureStatus> {
+  const response = await sessionFetch(base + "/status");
   assert.equal(response.status, 200);
   const value: unknown = await response.json();
   assert.ok(typeof value === "object" && value !== null);
@@ -65,13 +68,15 @@ test(
       });
       await fs.rm(dir, { recursive: true, force: true });
     });
-    const base = await new Promise<string>((resolve, reject) => {
+    const launchUrl = await new Promise<string>((resolve, reject) => {
       let output = "";
       child.stdout.on("data", (b: Buffer) => {
         output += b.toString();
         const url = output
           .split(/\r?\n/)
-          .find((line) => /^http:\/\/127\.0\.0\.1:\d+$/.test(line));
+          .find((line) =>
+            /^http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]{43}$/.test(line),
+          );
         if (url) resolve(url);
       });
       child.on("error", reject);
@@ -79,6 +84,22 @@ test(
         reject(Error("server exited: " + code + "\n" + diagnostics)),
       );
     });
+    const base = new URL(launchUrl).origin;
+    const token = new URLSearchParams(new URL(launchUrl).hash.slice(1)).get(
+      "token",
+    );
+    assert.ok(token);
+    const authorization = `Bearer ${token}`;
+    const sessionFetch: typeof fetch = (input, init = {}) => {
+      const headers = new Headers(init.headers);
+      headers.set("Authorization", authorization);
+      return fetch(input, { ...init, headers });
+    };
+    const address = JSON.parse(
+      await fs.readFile(path.join(dir, "address.json"), "utf8"),
+    );
+    assert.equal(address.url, base);
+    assert.ok(!JSON.stringify(address).includes(token));
     assert.equal(new URL(base).hostname, "127.0.0.1");
     assert.equal((await fetch(base)).status, 200);
     for (const legacyPath of ["/voice", "/voice.html"]) {
@@ -90,7 +111,7 @@ test(
       await (await fetch(base + "/voice")).text(),
       /chatgpt-screen-talk/,
     );
-    assert.equal((await captureStatus(base)).active, false);
+    assert.equal((await captureStatus(base, sessionFetch)).active, false);
     // 外部サイトから音声接続や画面の送信を開始できないことを確認する。
     assert.equal(
       (
@@ -153,7 +174,7 @@ test(
     for (const body of [{}, { sdp: 42 }, { sdp: "v=0" + "x".repeat(200000) }]) {
       assert.equal(
         (
-          await fetch(base + "/voice/start", {
+          await sessionFetch(base + "/voice/start", {
             method: "POST",
             headers: { Origin: base, "Content-Type": "application/json" },
             body: JSON.stringify(body),
@@ -164,7 +185,7 @@ test(
     }
     assert.equal(
       (
-        await fetch(base + "/frame", {
+        await sessionFetch(base + "/frame", {
           method: "POST",
           headers: { Origin: base, "Content-Type": "text/plain" },
           body: "x",
@@ -182,6 +203,7 @@ test(
           agent: false,
           headers: {
             Origin: base,
+            Authorization: authorization,
             "Content-Type": "image/jpeg",
             "Content-Length": 5 * 1024 * 1024 + 1,
             Connection: "close",
@@ -203,11 +225,11 @@ test(
       req.flushHeaders();
     });
     assert.equal(oversizedStatus, 413);
-    assert.equal((await captureStatus(base)).active, false);
+    assert.equal((await captureStatus(base, sessionFetch)).active, false);
     const image = new Uint8Array([255, 216, 255, 217]);
     assert.equal(
       (
-        await fetch(base + "/frame", {
+        await sessionFetch(base + "/frame", {
           method: "POST",
           headers: {
             Origin: base,
@@ -219,7 +241,7 @@ test(
       ).status,
       200,
     );
-    const shared = await captureStatus(base);
+    const shared = await captureStatus(base, sessionFetch);
     assert.equal(shared.active, true);
     assert.equal(shared.source, "window");
     assert.equal(shared.frames, 1);
@@ -228,20 +250,22 @@ test(
         Number.isFinite(Date.parse(shared.lastFrameAt)),
     );
     assert.deepEqual(
-      new Uint8Array(await (await fetch(base + "/latest.jpg")).arrayBuffer()),
+      new Uint8Array(
+        await (await sessionFetch(base + "/latest.jpg")).arrayBuffer(),
+      ),
       image,
     );
     assert.equal(
       (
-        await fetch(base + "/stop", {
+        await sessionFetch(base + "/stop", {
           method: "POST",
           headers: { Origin: base },
         })
       ).status,
       200,
     );
-    assert.equal((await captureStatus(base)).active, false);
-    assert.equal((await fetch(base + "/latest.jpg")).status, 404);
+    assert.equal((await captureStatus(base, sessionFetch)).active, false);
+    assert.equal((await sessionFetch(base + "/latest.jpg")).status, 404);
   },
 );
 
@@ -271,7 +295,9 @@ test(
         output += chunk.toString();
         const url = output
           .split(/\r?\n/)
-          .find((line) => /^http:\/\/127\.0\.0\.1:\d+$/.test(line));
+          .find((line) =>
+            /^http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]{43}$/.test(line),
+          );
         if (url) resolve(url);
       });
       child.once("error", reject);

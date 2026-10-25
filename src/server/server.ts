@@ -2,12 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
+import { createLocalAuth } from "./local-auth.js";
 
 const appRoot = fileURLToPath(new URL("../../", import.meta.url));
 const dataDir = path.resolve(
   process.env.DATA_DIR || path.join(appRoot, ".data"),
 );
-const app = await createApp({ dataDir });
+const auth = createLocalAuth();
+const app = await createApp({ dataDir, auth });
 try {
   const url = await app.listen({
     port: Number(process.argv[2] || process.env.PORT || 0),
@@ -17,7 +19,7 @@ try {
     path.join(dataDir, "address.json"),
     JSON.stringify({ url, pid: process.pid }),
   );
-  console.log(url);
+  console.log(`${url}/#token=${auth.token}`);
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;

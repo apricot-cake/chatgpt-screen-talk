@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { EventSource } from "eventsource";
+import { apiFetch } from "../lib/local-api";
 import type {
   VoiceDiagnostics,
   VoiceStartRequest,
@@ -19,7 +21,7 @@ function numeric(value: unknown): number | undefined {
     : undefined;
 }
 async function post(url: string, body: unknown): Promise<unknown> {
-  const response = await fetch(url, {
+  const response = await apiFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -255,7 +257,7 @@ export function useVoiceSession() {
           }
         } catch {}
       };
-      const events = new EventSource("/voice/events");
+      const events = new EventSource(new URL("/voice/events", location.origin), { fetch: apiFetch });
       c.events = events;
       events.onmessage = (event: MessageEvent<string>) => {
         if (!valid()) return;
@@ -329,7 +331,7 @@ export function useVoiceSession() {
     const cleanup = () => {
       const wasActive = current.current.phase !== "idle";
       void stop();
-      if (wasActive) navigator.sendBeacon("/voice/stop", "{}");
+      if (wasActive) void post("/voice/stop", {}).catch(() => {});
     };
     const restore = (event: PageTransitionEvent) => {
       if (!event.persisted) return;
