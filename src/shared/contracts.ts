@@ -5,8 +5,20 @@ export const ScreenToolInputSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const VoiceIdSchema = Type.String({ pattern: "^[a-z][a-z0-9_-]{0,63}$" });
+export const VoicePreviewSchema = Type.Object({}, { additionalProperties: false });
+export const VoiceChoicesSchema = Type.Object({
+  voices: Type.Array(VoiceIdSchema, { minItems: 1, maxItems: 128, uniqueItems: true }),
+  defaultVoice: VoiceIdSchema,
+}, { additionalProperties: false });
+export type VoiceChoices = Static<typeof VoiceChoicesSchema>;
+
 export const VoiceStartSchema = Type.Object(
-  { sdp: Type.String({ pattern: "^v=0", maxLength: 200_000 }) },
+  {
+    sdp: Type.String({ pattern: "^v=0", maxLength: 200_000 }),
+    voice: Type.Optional(VoiceIdSchema),
+    preview: Type.Optional(Type.Boolean()),
+  },
   { additionalProperties: false },
 );
 export type VoiceStartRequest = Static<typeof VoiceStartSchema>;

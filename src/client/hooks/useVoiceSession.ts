@@ -38,7 +38,7 @@ async function post(url: string, body: unknown): Promise<unknown> {
   return result;
 }
 
-export function useVoiceSession() {
+export function useVoiceSession({ preview = false }: { preview?: boolean } = {}) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const mounted = useRef(true);
   const current = useRef({
@@ -46,9 +46,11 @@ export function useVoiceSession() {
     generation: 0,
     pc: null as RTCPeerConnection | null,
     mic: null as MediaStream | null,
+    silence: null as AudioContext | null,
     events: null as EventSource | null,
     channel: null as RTCDataChannel | null,
     poll: undefined as ReturnType<typeof setInterval> | undefined,
+    previewTimer: undefined as ReturnType<typeof setTimeout> | undefined,
     pendingStart: null as Promise<unknown> | null,
     closing: null as Promise<void> | null,
   });
@@ -63,11 +65,15 @@ export function useVoiceSession() {
     const c = current.current;
     ++c.generation;
     clearInterval(c.poll);
+    clearTimeout(c.previewTimer);
+    c.previewTimer = undefined;
     c.poll = undefined;
     c.events?.close();
     c.events = null;
     c.mic?.getTracks().forEach((track) => track.stop());
     c.mic = null;
+    void c.silence?.close().catch(() => {});
+    c.silence = null;
     c.pc?.close();
     c.pc = null;
     c.channel = null;
@@ -123,7 +129,7 @@ export function useVoiceSession() {
       }
     }
   }, []);
-  const start = useCallback(async () => {
+  const start = useCallback(async (voice?: string) => {
     const c = current.current;
     if (c.phase !== "idle") return;
     c.phase = "connecting";
@@ -132,12 +138,26 @@ export function useVoiceSession() {
     setPhase("connecting");
     setError(null);
     setNeedsPlayback(false);
-    setMessage("マイクの許可を確認しています…");
+    setMessage(preview ? "試聴音声を準備しています…" : "マイクの許可を確認しています…");
     try {
-      const mic = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-        video: false,
-      });
+      let mic: MediaStream;
+      if (preview) {
+        // 音声接続用の無音トラック。マイクなどの入力機器は取得しません。
+        const context = new AudioContext();
+        c.silence = context;
+        const destination = context.createMediaStreamDestination();
+        const source = context.createConstantSource();
+        source.offset.value = 0;
+        source.connect(destination);
+        source.start();
+        await context.resume();
+        mic = destination.stream;
+      } else {
+        mic = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+          video: false,
+        });
+      }
       if (!valid()) {
         mic.getTracks().forEach((track) => track.stop());
         return;
@@ -160,6 +180,17 @@ export function useVoiceSession() {
       };
       const channel = pc.createDataChannel("oai-events");
       c.channel = channel;
+      channel.onopen = () => {
+        if (!preview || !valid()) return;
+        c.previewTimer = setTimeout(() => { if (valid()) void stop(); }, 12_000);
+        void post("/voice/preview/speak", {}).catch(() => {
+          if (!valid()) return;
+          setError("試聴音声を再生できませんでした。");
+          void stop(true);
+        });
+      };
+      let previousEnergy = 0;
+      let quietSamples = 0;
       const stats = async () => {
         if (!valid() || pc.connectionState !== "connected") return;
         try {
@@ -194,6 +225,12 @@ export function useVoiceSession() {
             audioTime: audioRef.current?.currentTime ?? 0,
           };
           await post("/voice/diagnostics", diagnostics);
+          const energy = diagnostics.inbound?.energy;
+          if (preview && valid() && energy !== undefined && energy > 0) {
+            quietSamples = energy <= previousEnergy + 1e-8 ? quietSamples + 1 : 0;
+            previousEnergy = energy;
+            if (quietSamples >= 3) void stop();
+          }
         } catch {}
       };
       pc.onconnectionstatechange = () => {
@@ -202,9 +239,9 @@ export function useVoiceSession() {
           c.phase = "connected";
           setError(null);
           setPhase("connected");
-          setMessage("接続しました。話しかけてください。");
+          setMessage(preview ? "試聴しています。" : "接続しました。話しかけてください。");
           clearInterval(c.poll);
-          c.poll = setInterval(() => void stats(), 2000);
+          c.poll = setInterval(() => void stats(), preview ? 500 : 2000);
         } else if (["failed", "disconnected"].includes(pc.connectionState)) {
           c.phase = "disconnected";
           setError(
@@ -223,6 +260,7 @@ export function useVoiceSession() {
         try {
           const value: unknown = JSON.parse(event.data);
           if (!record(value)) return;
+          if (preview && value.type === "output_audio_buffer.stopped") { void stop(); return; }
           if (
             (value.type === "input_transcript.added" ||
               value.type === "output_transcript.added") &&
@@ -257,7 +295,12 @@ export function useVoiceSession() {
           }
         } catch {}
       };
-      const events = new EventSource(new URL("/voice/events", location.origin), { fetch: apiFetch });
+      const events = new EventSource(
+        new URL("/voice/events", location.origin),
+        {
+          fetch: apiFetch,
+        },
+      );
       c.events = events;
       events.onmessage = (event: MessageEvent<string>) => {
         if (!valid()) return;
@@ -301,7 +344,7 @@ export function useVoiceSession() {
       const sdp = pc.localDescription?.sdp;
       if (!sdp) throw new Error("音声の接続情報を作成できませんでした。");
       setMessage("音声に接続しています…");
-      const pending = post("/voice/start", { sdp } satisfies VoiceStartRequest);
+      const pending = post("/voice/start", { sdp, ...(voice ? { voice } : {}), ...(preview ? { preview: true } : {}) } satisfies VoiceStartRequest);
       c.pendingStart = pending;
       let response: unknown;
       try {
@@ -325,7 +368,7 @@ export function useVoiceSession() {
       if (mounted.current) setError(text);
       if (mounted.current) setMessage(text);
     }
-  }, [stop]);
+  }, [stop, preview]);
   useEffect(() => {
     mounted.current = true;
     const cleanup = () => {

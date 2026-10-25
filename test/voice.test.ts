@@ -35,6 +35,7 @@ interface MockOptions {
   toolName?: string;
   toolNamespace?: string | null;
   configChanged?: boolean;
+  catalogFailure?: boolean;
 }
 
 async function withMock(
@@ -126,6 +127,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     else result({ config });
   }
   else if (message.method === "account/read") result({ account: { type: options.accountType || "chatgpt" } });
+  else if (message.method === "thread/realtime/listVoices") {
+    if (options.catalogFailure) send({ id: message.id, error: { code: -32603, message: "PRIVATE-PATH secret@example.com sk-not-for-client" } });
+    else result({ voices: { v1: ["cove"], v3: ["cove", "sol"], defaultV1: "cove" } });
+  }
   else if (message.method === "account/rateLimits/read") result({ ordinaryUsageAllowed: true, rateLimits: { primary: { usedPercent: 12 } } });
   else if (message.method === "thread/start") {
     if (options.configChanged) config.mcp_servers.race_added = { enabled: true };
@@ -137,8 +142,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       return;
     }
     result({});
+    send({ method: "thread/realtime/started", params: { threadId: "test-thread", version: "v3" } });
     send({ method: "thread/realtime/sdp", params: { sdp: "v=0\\r\\ns=mock-answer\\r\\n" } });
     send({ id: "screen-request", method: "item/tool/call", params: { namespace: options.toolNamespace === undefined ? "shared_screen" : options.toolNamespace, tool: options.toolName || "get_shared_screen", arguments: {} } });
+  } else if (message.method === "thread/realtime/appendSpeech") {
+    result({});
+    send({ method: "thread/realtime/outputAudio/delta", params: { threadId: "test-thread", audio: { data: "AABkAA==", sampleRate: 24000, numChannels: 1, samplesPerChannel: 2 } } });
   } else if (message.method === "thread/realtime/stop") result({});
 });
 `,
@@ -176,6 +185,55 @@ async function waitForLog(
   }
   throw new Error("mock Codexへの要求が完了しませんでした");
 }
+
+test("試聴は共有画像を使わず、選んだ声で固定文だけを一度発話する", { concurrency: false }, async () => {
+  let frameReads = 0;
+  await withMock({}, async (voice, readLog) => {
+    await assert.rejects(voice.speakPreview());
+    const result = await voice.start("v=0\r\n", "sol", true);
+    assert.equal(result.toolsEnabled, false);
+    await voice.speakPreview();
+    await assert.rejects(voice.speakPreview());
+    const entries = await waitForLog(readLog, entry => entry.id === "screen-request");
+    assert.deepEqual(record(entries.find(entry => entry.method === "thread/start")?.params).dynamicTools, []);
+    const speech = entries.filter(entry => entry.method === "thread/realtime/appendSpeech");
+    assert.equal(speech.length, 1);
+    assert.equal(record(speech[0]?.params).text, "こんにちは。この声でお話しします。");
+    assert.equal(record(entries.find(entry => entry.id === "screen-request")?.result).success, false);
+    assert.equal(frameReads, 0);
+    await voice.stop();
+    await voice.start("v=0\r\n");
+    await assert.rejects(voice.speakPreview());
+    await waitForLog(readLog, entry => entry.id === "screen-request" && record(entry.result).success === true);
+    assert.equal(frameReads, 1);
+  }, () => { frameReads++; return { bytes: Buffer.from([255, 216, 255, 217]), at: "test" }; });
+});
+
+test("声の一覧を会話を作らず取得し、選んだSolで接続する", { concurrency: false }, async () => {
+  await withMock({}, async (voice, readLog) => {
+    assert.deepEqual(await voice.voices(), { voices: ["cove", "sol"], defaultVoice: "cove" });
+    assert.equal((await readLog()).some(entry => entry.method === "thread/start"), false);
+    await voice.start("v=0\r\n", "sol");
+    const entries = await readLog();
+    assert.equal(entries.filter(entry => entry.method === "thread/realtime/listVoices").length, 1);
+    assert.equal(record(entries.find(entry => entry.method === "thread/realtime/start")?.params).voice, "sol");
+    assert.ok(entries.filter(entry => entry.event === "environment").every(entry => entry.platformKeysPresent === false));
+  });
+});
+
+test("未対応の声では会話を作らず、一覧取得失敗でも標準の声は使える", { concurrency: false }, async () => {
+  await withMock({}, async (voice, readLog) => {
+    await assert.rejects(voice.start("v=0\r\n", "unsupported"), /指定された声は利用できません/);
+    assert.equal((await readLog()).some(entry => entry.method === "thread/start"), false);
+  });
+  await withMock({ catalogFailure: true }, async voice => {
+    await assert.rejects(voice.voices(), error => {
+      assert.doesNotMatch(String(error), /PRIVATE-PATH|secret@example|sk-not-for-client/);
+      return true;
+    });
+    assert.equal((await voice.start("v=0\r\n")).state, "active");
+  });
+});
 
 test(
   "ChatGPT認証で画面付き音声接続を開始・終了し、APIキーを渡さない",

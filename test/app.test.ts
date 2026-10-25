@@ -17,6 +17,9 @@ test("全APIは起動ごとのBearer認証を要求し、符号化・HEAD・Cook
   let starts = 0;
   let stops = 0;
   let subscriptions = 0;
+  let choiceReads = 0;
+  let previewReads = 0;
+  let selectedVoice: string | undefined;
   let state: VoiceStatus["state"] = "stopped";
   const status = (): VoiceStatus => ({
     state,
@@ -27,7 +30,13 @@ test("全APIは起動ごとのBearer認証を要求し、符号化・HEAD・Cook
   });
   const voice: VoiceService = {
     status,
-    start: async () => {
+    voices: async () => {
+      choiceReads++;
+      return { voices: ["cove", "sol"], defaultVoice: "cove" };
+    },
+    speakPreview: async () => { previewReads++; },
+    start: async (_sdp, voiceName) => {
+      selectedVoice = voiceName;
       starts++;
       state = "active";
       return { sdp: "v=0\r\n", ...status() };
@@ -75,30 +84,45 @@ test("全APIは起動ごとのBearer認証を要求し、符号化・HEAD・Cook
       await fetch(origin + "/voice/start", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ sdp: "v=0\r\n" }),
+        body: JSON.stringify({ sdp: "v=0\r\n", voice: "sol" }),
       })
     ).status,
     200,
   );
+  assert.equal(selectedVoice, "sol");
+  const choicesResponse = await fetch(origin + "/voice/choices", { headers });
+  assert.equal(choicesResponse.status, 200);
+  assert.deepEqual(await choicesResponse.json(), { voices: ["cove", "sol"], defaultVoice: "cove" });
+  const previewResponse = await fetch(origin + "/voice/preview/speak", {
+    method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  assert.equal(previewResponse.status, 200);
+  assert.deepEqual(await previewResponse.json(), { ok: true });
+
   const getPaths = [
     "/status",
     "/latest.jpg",
     "/voice/status",
+    "/voice/choices",
     "/voice/events",
     "/%73tatus",
     "/latest%2ejpg",
     "/voice/%73tatus",
+    "/voice/%63hoices",
     "/voice/%65vents?x=1",
   ];
   const postPaths = [
     "/frame",
     "/stop",
     "/voice/start",
+    "/voice/preview/speak",
     "/voice/stop",
     "/voice/diagnostics",
     "/%66rame",
     "/%73top",
     "/voice/%73tart",
+    "/voice/%70review/speak",
     "/voice/%73top",
     "/voice/%64iagnostics",
   ];
@@ -148,6 +172,14 @@ test("全APIは起動ごとのBearer認証を要求し、符号化・HEAD・Cook
   assert.equal(starts, 1);
   assert.equal(stops, 0);
   assert.equal(subscriptions, 0);
+  assert.equal(choiceReads, 1);
+  assert.equal(previewReads, 1);
+  assert.equal((await fetch(origin + "/voice/start", {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ sdp: "v=0\r\n", voice: "Sol; command" }),
+  })).status, 400);
+  assert.equal(starts, 1);
   assert.deepEqual(
     new Uint8Array(await fs.readFile(path.join(directory, "latest.jpg"))),
     image,
@@ -264,6 +296,8 @@ test(
     });
     const voice: VoiceService = {
       status,
+      voices: async () => ({ voices: ["cove", "sol"], defaultVoice: "cove" }),
+      speakPreview: async () => {},
       start: async () => ({ sdp: "v=0\r\n", ...status() }),
       stop: async () => {
         stops++;

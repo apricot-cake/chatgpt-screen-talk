@@ -9,6 +9,8 @@ import {
   CaptureStatusSchema,
   VoiceDiagnosticsSchema,
   VoiceStartSchema,
+  VoiceChoicesSchema,
+  VoicePreviewSchema,
   type CaptureStatus,
 } from "../shared/contracts.js";
 import createVoice, { type VoiceService } from "./voice.js";
@@ -127,6 +129,11 @@ export async function createApp(options: AppOptions = {}) {
     publicApp.get("/voice.html", (_request, reply) => reply.redirect("/"));
   });
   app.get("/voice/status", () => getVoice().status());
+  app.get("/voice/choices", { schema: { response: { 200: VoiceChoicesSchema } } }, () => getVoice().voices());
+  app.post("/voice/preview/speak", { schema: { body: VoicePreviewSchema } }, async () => {
+    await getVoice().speakPreview();
+    return { ok: true };
+  });
   app.get("/voice/events", { sse: "only" }, async (_request, reply) => {
     reply.sse.keepAlive();
     eventStreams.add(reply.sse);
@@ -141,7 +148,7 @@ export async function createApp(options: AppOptions = {}) {
     "/voice/start",
     { schema: { body: VoiceStartSchema } },
     async (request) => {
-      return getVoice().start(request.body.sdp);
+      return getVoice().start(request.body.sdp, request.body.voice, request.body.preview);
     },
   );
   app.post("/voice/stop", async () => {

@@ -30,11 +30,15 @@ import {
 } from "@/components/ui/collapsible";
 import { useScreenShare } from "./hooks/useScreenShare";
 import { useVoiceSession } from "./hooks/useVoiceSession";
+import { useVoiceChoices } from "./hooks/useVoiceChoices";
+import { VoicePicker } from "./components/VoicePicker";
 import { ConnectionStatus } from "./components/ConnectionStatus";
 
 export default function App() {
   const screen = useScreenShare();
   const voice = useVoiceSession();
+  const preview = useVoiceSession({ preview: true });
+  const voiceSelection = useVoiceChoices();
   const screenIdle = screen.phase === "idle";
   const voiceIdle = voice.phase === "idle";
   const screenWaiting = screen.phase === "selecting";
@@ -122,8 +126,12 @@ export default function App() {
               variant={voiceIdle || voiceWaiting ? "default" : "destructive"}
               aria-label={voiceAction}
               title={voiceAction}
-              onClick={() => void (voiceIdle ? voice.start() : voice.stop())}
-              disabled={voiceWaiting || voice.phase === "stopping"}
+              onClick={() => void (async () => {
+                if (!voiceIdle) { await voice.stop(); return; }
+                await preview.stop();
+                await voice.start(voiceSelection.selectedVoice || undefined);
+              })()}
+              disabled={voiceWaiting || voice.phase === "stopping" || (voiceIdle && voiceSelection.loading)}
               aria-busy={voiceWaiting || voice.phase === "stopping"}
             >
               {voiceIdle || voiceWaiting ? (
@@ -221,6 +229,7 @@ export default function App() {
                   message={voice.error ?? voice.message}
                 />
               </CardTitle>
+              <VoicePicker selection={voiceSelection} preview={preview} disabled={!voiceIdle} />
             </CardHeader>
             <CardContent className="conversation-content flex flex-col gap-4">
               <audio ref={voice.audioRef} autoPlay />
