@@ -5,6 +5,7 @@ import {
   Monitor,
   MonitorOff,
   Phone,
+  RefreshCw,
   Volume2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -89,6 +90,19 @@ export default function App() {
             chatgpt-screen-talk
           </h1>
           <div className="flex shrink-0 items-center gap-2">
+            {screen.phase === "sharing" ? (
+              <Button
+                variant="outline"
+                aria-label="共有画面を切り替え"
+                title="共有画面を切り替え"
+                onClick={() => void screen.switchShare()}
+                disabled={screen.isSwitching}
+                aria-busy={screen.isSwitching}
+              >
+                <RefreshCw data-icon="inline-start" />
+                <span className="hidden sm:inline">{screen.isSwitching ? "画面を選択中" : "画面を切り替え"}</span>
+              </Button>
+            ) : null}
             <Button
               variant={screenIdle || screenWaiting ? "default" : "destructive"}
               aria-label={screenAction}
