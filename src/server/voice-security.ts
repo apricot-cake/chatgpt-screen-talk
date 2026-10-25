@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-export const SUPPORTED_CODEX_VERSION = "0.164.0-alpha.11.1";
+export const SUPPORTED_CODEX_VERSION = "0.164.0";
 export const SCREEN_TOOL_NAMESPACE = "shared_screen";
 const execute = promisify(execFile);
 const WORKSPACE_PREFIX = "chatgpt-screen-talk-voice-";

@@ -401,8 +401,8 @@ test(
   },
 );
 
-test("未知のCodex版・安全性不明の実効設定ではスレッドを作らない", { concurrency: false }, async () => {
-  for (const options of [{ version: "0.999.0" }, { unsafeConfig: true }, { configUnavailable: true }]) {
+test("未対応のCodex版・安全性不明の実効設定ではスレッドを作らない", { concurrency: false }, async () => {
+  for (const options of [{ version: "0.999.0" }, { version: "0.164.0-alpha.11.1" }, { unsafeConfig: true }, { configUnavailable: true }]) {
     await withMock(options, async (voice, readLog) => {
       await assert.rejects(voice.start("v=0\r\n"), /安全|config\/read/);
       assert.equal(voice.status().state, "stopped");

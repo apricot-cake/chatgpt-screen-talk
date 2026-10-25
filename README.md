@@ -14,7 +14,7 @@
 ## 必要な環境
 
 - [Node.js](https://nodejs.org/en/download) 22.12以降
-- [Codex CLI `0.164.0-alpha.11.1`](docs/利用ガイド.md#codexのバージョンが異なる場合) と、CodexでのChatGPTログイン
+- [Codex CLI `0.164.0`](docs/利用ガイド.md#codexのバージョンが異なる場合) と、CodexでのChatGPTログイン
 - ChromeまたはEdge
 
 音声会話には、ChatGPTのサブスクリプションに含まれる利用枠を使います。
