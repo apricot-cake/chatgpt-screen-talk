@@ -24,12 +24,16 @@ interface MockOptions {
   accountType?: string;
   unsupportedOptionalFields?: boolean;
   stateRuntimeFailure?: boolean;
+  configurationFailure?: boolean;
+  desktopSettings?: boolean;
   version?: string;
   unsafeConfig?: boolean;
+  unsafeCodeMode?: "enabled" | "namespace";
   configUnavailable?: boolean;
   unsupportedInitialItems?: boolean;
   mcpNames?: string[];
   toolName?: string;
+  toolNamespace?: string | null;
   configChanged?: boolean;
 }
 
@@ -97,8 +101,18 @@ for (let index = 0; index < args.length; index++) {
 }
 config.mcp_servers = Object.fromEntries((options.mcpNames || []).map(name => [name, { enabled: true }]));
 if (options.unsafeConfig) config.features.shell_tool = true;
+if (options.unsafeCodeMode === "enabled") config.features.code_mode.enabled = true;
+if (options.unsafeCodeMode === "namespace") config.features.code_mode.direct_only_tool_namespaces = ["other_namespace"];
 if (options.stateRuntimeFailure) {
   process.stderr.write("Error: failed to initialize sqlite state runtime under PRIVATE-PATH secret@example.com sk-not-for-client\\n");
+  process.exit(1);
+}
+if (options.configurationFailure) {
+  process.stderr.write("Error: PRIVATE-PATH: unknown configuration field 'private-setting' secret@example.com sk-not-for-client\\n");
+  process.exit(1);
+}
+if (options.desktopSettings && args.includes("--strict-config")) {
+  process.stderr.write("Error: unknown configuration field 'computer_use.windows.always_allowed_app_ids'\\n");
   process.exit(1);
 }
 log({ event: "environment", platformKeysPresent: ["OPENAI_API_KEY", "AZURE_OPENAI_API_KEY", "CODEX_API_KEY"].some((key) => key in process.env) });
@@ -124,7 +138,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }
     result({});
     send({ method: "thread/realtime/sdp", params: { sdp: "v=0\\r\\ns=mock-answer\\r\\n" } });
-    send({ id: "screen-request", method: "item/tool/call", params: { tool: options.toolName || "get_shared_screen", arguments: {} } });
+    send({ id: "screen-request", method: "item/tool/call", params: { namespace: options.toolNamespace === undefined ? "shared_screen" : options.toolNamespace, tool: options.toolName || "get_shared_screen", arguments: {} } });
   } else if (message.method === "thread/realtime/stop") result({});
 });
 `,
@@ -197,8 +211,12 @@ test(
       assert.ok(Array.isArray(threadParams.dynamicTools));
       assert.equal(
         record(threadParams.dynamicTools[0]).name,
-        "get_shared_screen",
+        "shared_screen",
       );
+      const screenTools = record(threadParams.dynamicTools[0]).tools;
+      assert.ok(Array.isArray(screenTools));
+      assert.equal(screenTools.length, 1);
+      assert.equal(record(screenTools[0]).name, "get_shared_screen");
       const realtimeRequest = entries.find(
         (entry) => entry.method === "thread/realtime/start",
       );
@@ -272,6 +290,39 @@ test(
 );
 
 test(
+  "個人設定の互換性エラーでは原因を示し設定値を返さず再試行しない",
+  { concurrency: false, timeout: 15000 },
+  async () => {
+    await withMock({ configurationFailure: true }, async (voice, readLog) => {
+      await assert.rejects(voice.start("v=0\r\n"), (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /個人設定の項目を認識できず/);
+        assert.doesNotMatch(
+          error.message,
+          /PRIVATE-PATH|private-setting|secret@example|sk-not-for-client/,
+        );
+        return true;
+      });
+      assert.equal(voice.status().state, "stopped");
+      const entries = await readLog();
+      assert.equal(
+        entries.filter(
+          (entry) =>
+            entry.event === "command" &&
+            Array.isArray(entry.args) &&
+            entry.args[0] === "app-server",
+        ).length,
+        1,
+      );
+      assert.equal(
+        entries.some((entry) => entry.method === "thread/start"),
+        false,
+      );
+    });
+  },
+);
+
+test(
   "権限制限に必要なフィールドを拒否された場合は設定を落として再試行しない",
   { concurrency: false, timeout: 15000 },
   async () => {
@@ -302,6 +353,23 @@ test("未知のCodex版・安全性不明の実効設定ではスレッドを作
   }
 });
 
+test("デスクトップ専用設定があっても実効制限を確認して音声接続する", { concurrency: false }, async () => {
+  await withMock({ desktopSettings: true }, async (voice, readLog) => {
+    const result = await voice.start("v=0\r\n");
+    assert.equal(result.state, "active");
+    const entries = await readLog();
+    assert.equal(entries.filter(entry => entry.method === "config/read").length, 2);
+    const params = record(entries.find(entry => entry.method === "thread/start")?.params);
+    assert.equal(params.sandbox, "read-only");
+    assert.equal(params.approvalPolicy, "never");
+    assert.deepEqual(record(params.config).mcp_servers, {});
+  });
+  await withMock({ desktopSettings: true, unsafeConfig: true }, async (voice, readLog) => {
+    await assert.rejects(voice.start("v=0\r\n"), /安全/);
+    assert.equal((await readLog()).some(entry => entry.method === "thread/start"), false);
+  });
+});
+
 test("全機能を既定拒否し特殊文字のMCP名も同じキーで無効にする", { concurrency: false }, async () => {
   const names = ["ordinary", "name.with.dots", 'name"quoted', "name\\backslash", "__proto__"];
   await withMock({ mcpNames: names }, async (voice, readLog) => {
@@ -309,7 +377,7 @@ test("全機能を既定拒否し特殊文字のMCP名も同じキーで無効�
     const entries = await readLog();
     const command = entries.find(entry => entry.event === "command" && Array.isArray(entry.args) && entry.args[0] === "app-server");
     assert.ok(Array.isArray(command?.args));
-    assert.ok(command.args.includes("--strict-config"));
+    assert.equal(command.args.includes("--strict-config"), false);
     assert.ok(command.args.includes("features.new_future_capability=false"));
     const params = record(entries.find(entry => entry.method === "thread/start")?.params);
     assert.equal(params.developerInstructions, "");
@@ -340,11 +408,21 @@ test("接続準備中にMCP設定が追加された場合は音声開始前に�
 });
 
 test("許可していない操作要求を実行せず拒否する", { concurrency: false }, async () => {
-  await withMock({ toolName: "exec_command" }, async (voice, readLog) => {
+  for (const options of [{ toolName: "exec_command" }, { toolNamespace: "other_namespace" }, { toolNamespace: null }])
+  await withMock(options, async (voice, readLog) => {
     await voice.start("v=0\r\n");
     const entries = await waitForLog(readLog, entry => entry.id === "screen-request");
     assert.equal(record(entries.find(entry => entry.id === "screen-request")?.result).success, false);
   }, () => { throw new Error("未許可の操作で画像を取得してはいけません"); });
+});
+
+test("共有画像の直接公開設定が異なる場合は接続しない", { concurrency: false }, async () => {
+  for (const unsafeCodeMode of ["enabled", "namespace"] as const) {
+    await withMock({ unsafeCodeMode }, async (voice, readLog) => {
+      await assert.rejects(voice.start("v=0\r\n"), /安全/);
+      assert.equal((await readLog()).some(entry => entry.method === "thread/start"), false);
+    });
+  }
 });
 
 test("停止したセッションの画像を再接続した別セッションへ返さない", { concurrency: false, timeout: 15000 }, async () => {

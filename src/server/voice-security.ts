@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 export const SUPPORTED_CODEX_VERSION = "0.164.0-alpha.11.1";
+export const SCREEN_TOOL_NAMESPACE = "shared_screen";
 const execute = promisify(execFile);
 const WORKSPACE_PREFIX = "chatgpt-screen-talk-voice-";
 // 認証の保存先や既存の安全機構は変更しません。操作能力を追加しない機能と音声だけを残します。
@@ -94,17 +95,26 @@ export async function prepareVoiceRuntime(
     }
     if (!REQUIRED_FEATURES.every(name => disabled.has(name))) throw unsafe();
     const overrides = [
-      ...[...disabled].map(name => [`features.${name}`, false] as const),
+      ...[...disabled].filter(name => name !== "code_mode").map(name => [`features.${name}`, false] as const),
+      // code-mode-onlyのモデルでも、共有画像だけを直接呼べるようにします。
+      ["features.code_mode.enabled", false] as const,
+      ["features.code_mode.direct_only_tool_namespaces", [SCREEN_TOOL_NAMESPACE]] as const,
       ...Object.entries(SETTINGS),
     ];
     const args = [
-      "app-server", "--strict-config", "--enable", "realtime_conversation",
+      "app-server", "--enable", "realtime_conversation",
       ...overrides.flatMap(([name, value]) => ["--config", `${name}=${JSON.stringify(value)}`]),
     ];
     const threadConfig = (result: unknown): Record<string, unknown> => {
         const config = object(object(result)?.config);
         const features = object(config?.features);
-        if (!config || !features || [...disabled].some(name => features[name] !== false)) throw unsafe();
+        if (!config || !features || [...disabled].some(name => name !== "code_mode" && features[name] !== false)) throw unsafe();
+        const codeMode = object(features.code_mode);
+        if (codeMode?.enabled !== false ||
+          Object.keys(codeMode).sort().join(",") !== "direct_only_tool_namespaces,enabled" ||
+          !Array.isArray(codeMode.direct_only_tool_namespaces) ||
+          codeMode.direct_only_tool_namespaces.length !== 1 ||
+          codeMode.direct_only_tool_namespaces[0] !== SCREEN_TOOL_NAMESPACE) throw unsafe();
         if (all.has("realtime_conversation") && features.realtime_conversation !== true) throw unsafe();
         if (
           config.web_search !== "disabled" || config.project_doc_max_bytes !== 0 ||

@@ -3,7 +3,7 @@ import readline from "node:readline";
 import fs from "node:fs";
 import path from "node:path";
 import { ScreenToolInputSchema } from "../shared/contracts.js";
-import { prepareVoiceRuntime, type VoiceRuntime } from "./voice-security.js";
+import { prepareVoiceRuntime, SCREEN_TOOL_NAMESPACE, type VoiceRuntime } from "./voice-security.js";
 
 export interface SharedFrame {
   bytes: Buffer;
@@ -212,6 +212,7 @@ export default function createVoice({
     const name = typeof params.tool === "string" ? params.tool : params.name;
     if (
       name !== "get_shared_screen" ||
+      params.namespace !== SCREEN_TOOL_NAMESPACE ||
       (params.name !== undefined && params.name !== name)
     ) {
       send({
@@ -475,11 +476,16 @@ export default function createVoice({
         toolsEnabled = false;
         if (runtime === prepared) runtime = null;
         void prepared.dispose().catch(() => {});
-        const detail = /failed to initialize (?:sqlite )?state runtime/i.test(
-          startupStderr,
-        )
-          ? "Codexのローカル状態データベースを初期化できません。サーバーを制限付きサンドボックスの外で起動し、Codexのデータフォルダーへの書き込み権限を確認してください。"
-          : "音声サーバーが終了しました。";
+        let detail = "音声サーバーが終了しました。";
+        if (
+          /failed to initialize (?:sqlite )?state runtime/i.test(startupStderr)
+        ) {
+          detail =
+            "Codexのローカル状態データベースを初期化できません。サーバーを制限付きサンドボックスの外で起動し、Codexのデータフォルダーへの書き込み権限を確認してください。";
+        } else if (/unknown configuration field/i.test(startupStderr)) {
+          detail =
+            "Codexが個人設定の項目を認識できず起動できません。Codexの対応版と個人設定の互換性を確認してください。安全性を確認できないため音声接続を開始していません。";
+        }
         lastError = `${detail}（終了コード: ${code ?? signal ?? "不明"}）`;
         emit({ type: "error", message: lastError });
         failPending(new Error(lastError));
@@ -528,11 +534,16 @@ export default function createVoice({
         ...base,
         dynamicTools: [
           {
-            type: "function",
-            name: "get_shared_screen",
-            description:
-              "ユーザーが共有中の画面の最新画像を取得する。読み取り専用。",
-            inputSchema: ScreenToolInputSchema,
+            type: "namespace",
+            name: SCREEN_TOOL_NAMESPACE,
+            description: "ユーザーが共有中の画面を読み取る。",
+            tools: [{
+              type: "function",
+              name: "get_shared_screen",
+              description:
+                "ユーザーが共有中の画面の最新画像を取得する。読み取り専用。",
+              inputSchema: ScreenToolInputSchema,
+            }],
           },
         ],
       });
