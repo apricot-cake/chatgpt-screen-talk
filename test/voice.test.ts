@@ -28,7 +28,9 @@ interface MockOptions {
   desktopSettings?: boolean;
   version?: string;
   unsafeConfig?: boolean;
-  unsafeCodeMode?: "enabled" | "namespace";
+  unsafeCodeMode?: "enabled" | "namespace" | "extra_namespace";
+  unsafeSearch?: "disabled" | "cached" | "feature";
+  omitSearchFeature?: boolean;
   configUnavailable?: boolean;
   unsupportedInitialItems?: boolean;
   mcpNames?: string[];
@@ -88,7 +90,7 @@ if (args[0] === "--version") {
   process.exit(0);
 }
 if (args[0] === "features") {
-  console.log(["shell_tool", "view_image", "multi_agent", "plugins", "hooks", "apps", "goals", "code_mode", "computer_use", "browser_use", "skill_search", "unified_exec", "new_future_capability"].map(name => name + " stable true").join("\\n"));
+  console.log(["shell_tool", "view_image", "multi_agent", "plugins", "hooks", "apps", "goals", "code_mode", "computer_use", "browser_use", "skill_search", "unified_exec", "standalone_web_search", "new_future_capability"].filter(name => !options.omitSearchFeature || name !== "standalone_web_search").map(name => name + " stable true").join("\\n"));
   process.exit(0);
 }
 const config = {};
@@ -104,6 +106,9 @@ config.mcp_servers = Object.fromEntries((options.mcpNames || []).map(name => [na
 if (options.unsafeConfig) config.features.shell_tool = true;
 if (options.unsafeCodeMode === "enabled") config.features.code_mode.enabled = true;
 if (options.unsafeCodeMode === "namespace") config.features.code_mode.direct_only_tool_namespaces = ["other_namespace"];
+if (options.unsafeCodeMode === "extra_namespace") config.features.code_mode.direct_only_tool_namespaces.push("other_namespace");
+if (options.unsafeSearch === "feature") config.features.standalone_web_search = false;
+else if (options.unsafeSearch) config.web_search = options.unsafeSearch;
 if (options.stateRuntimeFailure) {
   process.stderr.write("Error: failed to initialize sqlite state runtime under PRIVATE-PATH secret@example.com sk-not-for-client\\n");
   process.exit(1);
@@ -474,10 +479,56 @@ test("許可していない操作要求を実行せず拒否する", { concurren
   }, () => { throw new Error("未許可の操作で画像を取得してはいけません"); });
 });
 
-test("共有画像の直接公開設定が異なる場合は接続しない", { concurrency: false }, async () => {
-  for (const unsafeCodeMode of ["enabled", "namespace"] as const) {
+test("共有画像と検索の直接公開設定が異なる場合は接続しない", { concurrency: false }, async () => {
+  for (const unsafeCodeMode of ["enabled", "namespace", "extra_namespace"] as const) {
     await withMock({ unsafeCodeMode }, async (voice, readLog) => {
       await assert.rejects(voice.start("v=0\r\n"), /安全/);
+      assert.equal((await readLog()).some(entry => entry.method === "thread/start"), false);
+    });
+  }
+});
+
+test("会話では標準ウェブ検索だけを追加し、試聴と声一覧では検索を無効にする", { concurrency: false }, async () => {
+  await withMock({}, async (voice, readLog) => {
+    await voice.start("v=0\r\n");
+    const conversationCommands = (await readLog()).filter(entry => entry.event === "command" && Array.isArray(entry.args) && entry.args[0] === "app-server");
+    const conversationArgs = conversationCommands[0]?.args;
+    assert.ok(Array.isArray(conversationArgs));
+    assert.ok(conversationArgs.includes('web_search="live"'));
+    assert.ok(conversationArgs.includes("features.standalone_web_search=true"));
+    assert.ok(conversationArgs.includes('features.code_mode.direct_only_tool_namespaces=["shared_screen","web"]'));
+    assert.ok(conversationArgs.includes("features.shell_tool=false"));
+    assert.ok(conversationArgs.includes("features.browser_use=false"));
+    assert.ok(conversationArgs.includes("features.new_future_capability=false"));
+    const params = record((await readLog()).find(entry => entry.method === "thread/start")?.params);
+    assert.ok(Array.isArray(params.dynamicTools));
+    assert.equal(params.dynamicTools.length, 1);
+    assert.equal(record(params.dynamicTools[0]).name, "shared_screen");
+    await voice.stop();
+    await voice.start("v=0\r\n", undefined, true);
+    await voice.stop();
+    await voice.voices();
+    const otherCommands = (await readLog()).filter(entry => entry.event === "command" && Array.isArray(entry.args) && entry.args[0] === "app-server").slice(1);
+    assert.equal(otherCommands.length, 2);
+    for (const command of otherCommands) {
+      assert.ok(Array.isArray(command.args));
+      assert.ok(command.args.includes('web_search="disabled"'));
+      assert.ok(command.args.includes("features.standalone_web_search=false"));
+      assert.ok(command.args.includes('features.code_mode.direct_only_tool_namespaces=["shared_screen"]'));
+    }
+  });
+});
+
+test("検索機能が利用できない、または実効設定で無効なら会話を開始しない", { concurrency: false }, async () => {
+  for (const options of [
+    { omitSearchFeature: true },
+    { unsafeSearch: "disabled" as const },
+    { unsafeSearch: "cached" as const },
+    { unsafeSearch: "feature" as const },
+  ]) {
+    await withMock(options, async (voice, readLog) => {
+      await assert.rejects(voice.start("v=0\r\n"), /安全/);
+      assert.equal(voice.status().state, "stopped");
       assert.equal((await readLog()).some(entry => entry.method === "thread/start"), false);
     });
   }

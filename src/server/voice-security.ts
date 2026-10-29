@@ -56,7 +56,10 @@ function unsafe(): Error {
 export async function prepareVoiceRuntime(
   executable: CodexExecutable,
   env: NodeJS.ProcessEnv,
+  { webSearch = false }: { webSearch?: boolean } = {},
 ): Promise<VoiceRuntime> {
+  const searchMode = webSearch ? "live" : "disabled";
+  const directNamespaces = webSearch ? [SCREEN_TOOL_NAMESPACE, "web"] : [SCREEN_TOOL_NAMESPACE];
   const temporaryRoot = path.resolve(os.tmpdir());
   const cwd = await fs.mkdtemp(path.join(temporaryRoot, WORKSPACE_PREFIX));
   const dispose = async () => {
@@ -94,12 +97,16 @@ export async function prepareVoiceRuntime(
       if (match[2] !== "removed" && !PRESERVED_FEATURES.has(name)) disabled.add(name);
     }
     if (!REQUIRED_FEATURES.every(name => disabled.has(name))) throw unsafe();
+    if (webSearch) {
+      if (!disabled.delete("standalone_web_search")) throw unsafe();
+    }
     const overrides = [
       ...[...disabled].filter(name => name !== "code_mode").map(name => [`features.${name}`, false] as const),
-      // code-mode-onlyのモデルでも、共有画像だけを直接呼べるようにします。
+      // code-mode-onlyのモデルでも、共有画像と許可した検索だけを直接呼べるようにします。
       ["features.code_mode.enabled", false] as const,
-      ["features.code_mode.direct_only_tool_namespaces", [SCREEN_TOOL_NAMESPACE]] as const,
-      ...Object.entries(SETTINGS),
+      ["features.code_mode.direct_only_tool_namespaces", directNamespaces] as const,
+      ...(webSearch ? [["features.standalone_web_search", true] as const] : []),
+      ...Object.entries({ ...SETTINGS, web_search: searchMode }),
     ];
     const args = [
       "app-server", "--enable", "realtime_conversation",
@@ -113,11 +120,11 @@ export async function prepareVoiceRuntime(
         if (codeMode?.enabled !== false ||
           Object.keys(codeMode).sort().join(",") !== "direct_only_tool_namespaces,enabled" ||
           !Array.isArray(codeMode.direct_only_tool_namespaces) ||
-          codeMode.direct_only_tool_namespaces.length !== 1 ||
-          codeMode.direct_only_tool_namespaces[0] !== SCREEN_TOOL_NAMESPACE) throw unsafe();
+          JSON.stringify(codeMode.direct_only_tool_namespaces) !== JSON.stringify(directNamespaces)) throw unsafe();
+        if (webSearch && features.standalone_web_search !== true) throw unsafe();
         if (all.has("realtime_conversation") && features.realtime_conversation !== true) throw unsafe();
         if (
-          config.web_search !== "disabled" || config.project_doc_max_bytes !== 0 ||
+          config.web_search !== searchMode || config.project_doc_max_bytes !== 0 ||
           config.instructions !== "" || config.developer_instructions !== "" ||
           !Array.isArray(config.notify) || config.notify.length !== 0 ||
           !Array.isArray(config.project_doc_fallback_filenames) || config.project_doc_fallback_filenames.length !== 0 ||

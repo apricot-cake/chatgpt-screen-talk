@@ -36,7 +36,7 @@ function choices(value: unknown): { voices: string[]; defaultVoice: string } {
   return { voices, defaultVoice };
 }
 
-/** 会話を作らず、音声セッションと同じ制限でCLIの声の一覧だけを読み取ります。 */
+/** 会話を作らず、操作機能とウェブ検索を無効にしてCLIの声の一覧だけを読み取ります。 */
 export async function readVoiceChoices(
   executable: CodexExecutable,
   env: NodeJS.ProcessEnv,
