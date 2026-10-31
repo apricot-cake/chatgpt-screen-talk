@@ -8,10 +8,13 @@ import { fileURLToPath } from "node:url";
 import { request } from "node:http";
 
 interface CaptureStatus {
-  active: boolean;
+  screens: {
+  id: string;
+  label: string;
   source: string | null;
   frames: number;
   lastFrameAt: string | null;
+  }[];
 }
 
 async function captureStatus(
@@ -22,22 +25,8 @@ async function captureStatus(
   assert.equal(response.status, 200);
   const value: unknown = await response.json();
   assert.ok(typeof value === "object" && value !== null);
-  assert.ok("active" in value && typeof value.active === "boolean");
-  assert.ok(
-    "source" in value &&
-      (value.source === null || typeof value.source === "string"),
-  );
-  assert.ok("frames" in value && typeof value.frames === "number");
-  assert.ok(
-    "lastFrameAt" in value &&
-      (value.lastFrameAt === null || typeof value.lastFrameAt === "string"),
-  );
-  return {
-    active: value.active,
-    source: value.source,
-    frames: value.frames,
-    lastFrameAt: value.lastFrameAt,
-  };
+  assert.ok("screens" in value && Array.isArray(value.screens));
+  return value as unknown as CaptureStatus;
 }
 test(
   "ローカル画面共有の送信元制限・入力検証・開始と停止",
@@ -111,7 +100,9 @@ test(
       await (await fetch(base + "/voice")).text(),
       /chatgpt-screen-talk/,
     );
-    assert.equal((await captureStatus(base, sessionFetch)).active, false);
+    assert.deepEqual((await captureStatus(base, sessionFetch)).screens, []);
+    const screenId = "00000000-0000-4000-8000-000000000001";
+    const screenPath = `/screens/${screenId}`;
     // 外部サイトから音声接続や画面の送信を開始できないことを確認する。
     assert.equal(
       (
@@ -128,7 +119,7 @@ test(
     );
     assert.equal(
       (
-        await fetch(base + "/frame", {
+        await fetch(base + screenPath + "/frame", {
           method: "POST",
           headers: {
             Origin: "https://example.invalid",
@@ -185,7 +176,7 @@ test(
     }
     assert.equal(
       (
-        await sessionFetch(base + "/frame", {
+        await sessionFetch(base + screenPath + "/frame", {
           method: "POST",
           headers: { Origin: base, "Content-Type": "text/plain" },
           body: "x",
@@ -197,7 +188,7 @@ test(
     // 本文を送信しないため、413と大容量uploadのsocket終了が競合しない。
     const oversizedStatus = await new Promise<number>((resolve, reject) => {
       const req = request(
-        base + "/frame",
+        base + screenPath + "/frame",
         {
           method: "POST",
           agent: false,
@@ -225,11 +216,15 @@ test(
       req.flushHeaders();
     });
     assert.equal(oversizedStatus, 413);
-    assert.equal((await captureStatus(base, sessionFetch)).active, false);
+    assert.deepEqual((await captureStatus(base, sessionFetch)).screens, []);
+    assert.equal((await sessionFetch(base + "/screens", {
+      method: "POST", headers: { Origin: base, "Content-Type": "application/json" },
+      body: JSON.stringify({ id: screenId, label: "画面1" }),
+    })).status, 200);
     const image = new Uint8Array([255, 216, 255, 217]);
     assert.equal(
       (
-        await sessionFetch(base + "/frame", {
+        await sessionFetch(base + screenPath + "/frame", {
           method: "POST",
           headers: {
             Origin: base,
@@ -241,8 +236,8 @@ test(
       ).status,
       200,
     );
-    const shared = await captureStatus(base, sessionFetch);
-    assert.equal(shared.active, true);
+    const shared = (await captureStatus(base, sessionFetch)).screens[0];
+    assert.ok(shared);
     assert.equal(shared.source, "window");
     assert.equal(shared.frames, 1);
     assert.ok(
@@ -251,21 +246,21 @@ test(
     );
     assert.deepEqual(
       new Uint8Array(
-        await (await sessionFetch(base + "/latest.jpg")).arrayBuffer(),
+        await (await sessionFetch(base + screenPath + "/latest.jpg")).arrayBuffer(),
       ),
       image,
     );
     assert.equal(
       (
-        await sessionFetch(base + "/stop", {
+        await sessionFetch(base + screenPath + "/stop", {
           method: "POST",
           headers: { Origin: base },
         })
       ).status,
       200,
     );
-    assert.equal((await captureStatus(base, sessionFetch)).active, false);
-    assert.equal((await sessionFetch(base + "/latest.jpg")).status, 404);
+    assert.deepEqual((await captureStatus(base, sessionFetch)).screens, []);
+    assert.equal((await sessionFetch(base + screenPath + "/latest.jpg")).status, 404);
   },
 );
 

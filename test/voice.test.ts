@@ -47,7 +47,7 @@ async function withMock(
     voice: VoiceService,
     readLog: () => Promise<JsonRecord[]>,
   ) => Promise<void>,
-  getFrame?: () => SharedFrame | null | Promise<SharedFrame | null>,
+  getFrames?: () => SharedFrame[] | Promise<SharedFrame[]>,
 ): Promise<void> {
   const directory = await fs.mkdtemp(
     path.join(os.tmpdir(), "chatgpt-screen-talk-voice-"),
@@ -65,10 +65,11 @@ async function withMock(
   );
   const voice = createVoice({
     cwd: directory,
-    getFrame: getFrame ?? (() => ({
+    getFrames: getFrames ?? (() => [{
+      id: "test-screen", label: "画面 1",
       bytes: Buffer.from([255, 216, 255, 217]),
       at: "2026-10-24T00:00:00.000Z",
-    })),
+    }]),
   });
   try {
     await fs.writeFile(
@@ -213,7 +214,7 @@ test("試聴は共有画像を使わず、選んだ声で固定文だけを一�
     await assert.rejects(voice.speakPreview());
     await waitForLog(readLog, entry => entry.id === "screen-request" && record(entry.result).success === true);
     assert.equal(frameReads, 1);
-  }, () => { frameReads++; return { bytes: Buffer.from([255, 216, 255, 217]), at: "test" }; });
+  }, () => { frameReads++; return [{ id: "test", label: "画面 1", bytes: Buffer.from([255, 216, 255, 217]), at: "test" }]; });
 });
 
 test("声の一覧を会話を作らず取得し、選んだSolで接続する", { concurrency: false }, async () => {
@@ -536,9 +537,47 @@ test("検索機能が利用できない、または実効設定で無効なら�
   }
 });
 
+test("共有中の複数画面を識別名と画像の組で返し、未共有なら画像を返さない", { concurrency: false }, async () => {
+  const frames = [
+    { id: "screen-one", label: "画面 1", bytes: Buffer.from([255, 216, 255, 217]), at: "first" },
+    { id: "screen-two", label: "画面 2", bytes: Buffer.from([137, 80, 78, 71]), at: "second" },
+  ];
+  for (const shared of [frames, []]) {
+    await withMock({}, async (voice, readLog) => {
+      await voice.start("v=0\r\n");
+      const entries = await waitForLog(readLog, entry => entry.id === "screen-request");
+      const result = record(entries.find(entry => entry.id === "screen-request")?.result);
+      assert.equal(result.success, shared.length > 0);
+      assert.ok(Array.isArray(result.contentItems));
+      const images = result.contentItems.map(record).filter(item => item.type === "inputImage");
+      assert.equal(images.length, shared.length);
+      if (shared.length) {
+        assert.match(String(record(result.contentItems[0]).text), /画面 1.*screen-one.*first/);
+        assert.equal(images[0]?.imageUrl, "data:image/jpeg;base64,/9j/2Q==");
+        assert.match(String(record(result.contentItems[2]).text), /画面 2.*screen-two.*second/);
+        assert.equal(images[1]?.imageUrl, "data:image/png;base64,iVBORw==");
+      } else assert.match(String(record(result.contentItems[0]).text), /共有されていません/);
+    }, () => shared);
+  }
+});
+
+test("画面数・画像サイズの上限を超えた場合は画像を返さない", { concurrency: false }, async () => {
+  const frame = { id: "screen", label: "画面 1", bytes: Buffer.from([255, 216]), at: "test" };
+  for (const frames of [Array.from({ length: 5 }, () => frame), [{ ...frame, bytes: Buffer.alloc(5 * 1024 * 1024 + 1) }]]) {
+    await withMock({}, async (voice, readLog) => {
+      await voice.start("v=0\r\n");
+      const entries = await waitForLog(readLog, entry => entry.id === "screen-request");
+      const result = record(entries.find(entry => entry.id === "screen-request")?.result);
+      assert.equal(result.success, false);
+      assert.ok(Array.isArray(result.contentItems));
+      assert.equal(result.contentItems.some(item => record(item).type === "inputImage"), false);
+    }, () => frames);
+  }
+});
+
 test("停止したセッションの画像を再接続した別セッションへ返さない", { concurrency: false, timeout: 15000 }, async () => {
-  let release: (frame: SharedFrame) => void = () => {};
-  const oldFrame = new Promise<SharedFrame>(resolve => { release = resolve; });
+  let release: (frames: SharedFrame[]) => void = () => {};
+  const oldFrame = new Promise<SharedFrame[]>(resolve => { release = resolve; });
   let frameCalls = 0;
   await withMock({}, async (voice, readLog) => {
     await voice.start("v=0\r\n");
@@ -548,12 +587,12 @@ test("停止したセッションの画像を再接続した別セッション�
     await voice.stop();
     await voice.start("v=0\r\n");
     await waitForLog(readLog, entry => entry.id === "screen-request");
-    release({ bytes: Buffer.from("PRIVATE_OLD_FRAME"), at: "old" });
+    release([{ id: "old", label: "画面 1", bytes: Buffer.from("PRIVATE_OLD_FRAME"), at: "old" }]);
     await delay(100);
     const replies = (await readLog()).filter(entry => entry.id === "screen-request");
     assert.equal(replies.length, 1);
     assert.doesNotMatch(JSON.stringify(replies), /UFJJVkFURV9PTERfRlJBTUU=/);
-  }, () => ++frameCalls === 1 ? oldFrame : { bytes: Buffer.from([255, 216, 255, 217]), at: "new" });
+  }, () => ++frameCalls === 1 ? oldFrame : [{ id: "new", label: "画面 2", bytes: Buffer.from([255, 216, 255, 217]), at: "new" }]);
 });
 
 test("音声サービスが接続を閉じた場合は再開方法を通知して停止する", { concurrency: false }, async () => {

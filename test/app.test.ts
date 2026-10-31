@@ -10,6 +10,59 @@ import { createLocalAuth } from "../src/server/local-auth.js";
 import type { VoiceService, VoiceStatus } from "../src/server/voice.js";
 import { EventSource } from "eventsource";
 
+test("複数画面を隔離し、共有数・ID・停止後の遅延送信を検証する", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "screen-talk-multiple-"));
+  const auth = createLocalAuth();
+  const app = await createApp({ dataDir: directory, auth });
+  t.after(async () => {
+    app.server.closeAllConnections();
+    await app.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  const origin = await app.listen({ host: "127.0.0.1", port: 0 });
+  const headers = { Authorization: `Bearer ${auth.token}`, Origin: origin };
+  const post = (endpoint: string, body?: unknown) => fetch(origin + endpoint, {
+    method: "POST", headers: { ...headers, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const ids = Array.from({ length: 5 }, (_, index) => `00000000-0000-4000-8000-00000000000${index + 1}`);
+  const read = async () => (await (await fetch(origin + "/status", { headers })).json()).screens as { id: string; label: string; frames: number }[];
+  const upload = (id: string, bytes = new Uint8Array([255, 216, 255, 217])) => fetch(origin + `/screens/${id}/frame`, {
+    method: "POST", headers: { ...headers, "Content-Type": "image/jpeg" }, body: bytes,
+  });
+  for (const body of [{ id: "../outside", label: "画面" }, { id: ids[0], label: "" }, { id: ids[0], label: "x".repeat(81) }, { id: ids[0], label: "画面", extra: true }]) {
+    assert.equal((await post("/screens", body)).status, 400);
+  }
+  assert.equal((await upload(ids[0]!)).status, 404);
+  for (const [index, id] of ids.slice(0, 4).entries()) assert.equal((await post("/screens", { id, label: `画面${index + 1}` })).status, 200);
+  assert.equal((await post("/screens", { id: ids[0], label: "重複" })).status, 409);
+  assert.equal((await post("/screens", { id: ids[4], label: "上限超過" })).status, 409);
+  assert.equal((await fetch(origin + `/screens/${ids[0]}/latest.jpg`, { headers })).status, 404);
+  const first = new Uint8Array([255, 216, 1, 217]);
+  const second = new Uint8Array([255, 216, 2, 217]);
+  assert.equal((await upload(ids[0]!, first)).status, 200);
+  assert.equal((await upload(ids[1]!, second)).status, 200);
+  for (const [index, bytes] of [first, second].entries()) {
+    assert.deepEqual(new Uint8Array(await (await fetch(origin + `/screens/${ids[index]}/latest.jpg`, { headers })).arrayBuffer()), bytes);
+    assert.deepEqual(new Uint8Array(await fs.readFile(path.join(directory, "screens", `${ids[index]}.jpg`))), bytes);
+  }
+  assert.equal((await read())[0]?.frames, 1);
+  assert.equal((await post(`/screens/${ids[0]}/stop`)).status, 200);
+  assert.equal((await upload(ids[0]!)).status, 404);
+  assert.equal((await fetch(origin + `/screens/${ids[0]}/latest.jpg`, { headers })).status, 404);
+  assert.equal((await read()).length, 3);
+  assert.equal((await read())[0]?.id, ids[1]);
+  assert.deepEqual(new Uint8Array(await (await fetch(origin + `/screens/${ids[1]}/latest.jpg`, { headers })).arrayBuffer()), second);
+  assert.equal((await post("/screens", { id: ids[4], label: "追加" })).status, 200);
+  assert.equal((await post("/screens/stop")).status, 200);
+  assert.deepEqual(await read(), []);
+  assert.equal((await upload(ids[1]!)).status, 404);
+  for (const endpoint of ["/frame", "/latest.jpg", "/stop"]) {
+    assert.equal((await fetch(origin + endpoint, { headers, method: endpoint === "/latest.jpg" ? "GET" : "POST" })).status, 404);
+  }
+  assert.equal((await upload("invalid")).status, 400);
+});
+
 test("全APIは起動ごとのBearer認証を要求し、符号化・HEAD・Cookieでは迂回できない", async (t) => {
   const directory = await fs.mkdtemp(
     path.join(os.tmpdir(), "screen-talk-auth-"),
@@ -69,9 +122,15 @@ test("全APIは起動ごとのBearer認証を要求し、符号化・HEAD・Cook
   const authorization = `Bearer ${auth.token}`;
   const headers = { Authorization: authorization, Origin: origin };
   const image = new Uint8Array([255, 216, 255, 217]);
+  const screenId = "00000000-0000-4000-8000-000000000001";
+  const screenPath = `/screens/${screenId}`;
+  assert.equal((await fetch(origin + "/screens", {
+    method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ id: screenId, label: "画面1" }),
+  })).status, 200);
   assert.equal(
     (
-      await fetch(origin + "/frame", {
+      await fetch(origin + screenPath + "/frame", {
         method: "POST",
         headers: { ...headers, "Content-Type": "image/jpeg" },
         body: image,
@@ -102,25 +161,27 @@ test("全APIは起動ごとのBearer認証を要求し、符号化・HEAD・Cook
 
   const getPaths = [
     "/status",
-    "/latest.jpg",
+    screenPath + "/latest.jpg",
     "/voice/status",
     "/voice/choices",
     "/voice/events",
     "/%73tatus",
-    "/latest%2ejpg",
+    screenPath + "/latest%2ejpg",
     "/voice/%73tatus",
     "/voice/%63hoices",
     "/voice/%65vents?x=1",
   ];
   const postPaths = [
-    "/frame",
-    "/stop",
+    "/screens",
+    screenPath + "/frame",
+    screenPath + "/stop",
+    "/screens/stop",
     "/voice/start",
     "/voice/preview/speak",
     "/voice/stop",
     "/voice/diagnostics",
-    "/%66rame",
-    "/%73top",
+    screenPath + "/%66rame",
+    "/screens/%73top",
     "/voice/%73tart",
     "/voice/%70review/speak",
     "/voice/%73top",
@@ -181,16 +242,16 @@ test("全APIは起動ごとのBearer認証を要求し、符号化・HEAD・Cook
   })).status, 400);
   assert.equal(starts, 1);
   assert.deepEqual(
-    new Uint8Array(await fs.readFile(path.join(directory, "latest.jpg"))),
+    new Uint8Array(await fs.readFile(path.join(directory, "screens", `${screenId}.jpg`))),
     image,
   );
   await assert.rejects(fs.stat(path.join(directory, "voice-diagnostics.json")));
   const shared = await (await fetch(origin + "/status", { headers })).json();
-  assert.equal(shared.active, true);
-  assert.equal(shared.frames, 1);
+  assert.equal(shared.screens.length, 1);
+  assert.equal(shared.screens[0].frames, 1);
   assert.deepEqual(
     new Uint8Array(
-      await (await fetch(origin + "/latest.jpg", { headers })).arrayBuffer(),
+      await (await fetch(origin + screenPath + "/latest.jpg", { headers })).arrayBuffer(),
     ),
     image,
   );
@@ -260,15 +321,15 @@ test("全APIは起動ごとのBearer認証を要求し、符号化・HEAD・Cook
     200,
   );
   assert.equal(
-    (await (await fetch(origin + "/status", { headers })).json()).active,
-    true,
+    (await (await fetch(origin + "/status", { headers })).json()).screens.length,
+    1,
   );
   assert.equal(stops, 1);
   assert.equal(
-    (await fetch(origin + "/stop", { method: "POST", headers })).status,
+    (await fetch(origin + "/screens/stop", { method: "POST", headers })).status,
     200,
   );
-  assert.equal((await fetch(origin + "/latest.jpg", { headers })).status, 404);
+  assert.equal((await fetch(origin + screenPath + "/latest.jpg", { headers })).status, 404);
   const publicHtml = await fetch(origin);
   assert.equal(publicHtml.status, 200);
   assert.ok(!(await publicHtml.text()).includes(auth.token));

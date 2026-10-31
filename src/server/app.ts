@@ -11,7 +11,10 @@ import {
   VoiceStartSchema,
   VoiceChoicesSchema,
   VoicePreviewSchema,
-  type CaptureStatus,
+  MAX_SHARED_SCREENS,
+  ScreenParamsSchema,
+  ScreenStartSchema,
+  type ScreenCapture,
 } from "../shared/contracts.js";
 import createVoice, { type VoiceService } from "./voice.js";
 import { createLocalAuth, type LocalAuth } from "./local-auth.js";
@@ -38,22 +41,19 @@ export async function createApp(options: AppOptions = {}) {
     options.dataDir || process.env.DATA_DIR || path.join(appRoot, ".data"),
   );
   fs.mkdirSync(dataDir, { recursive: true });
-  let latest: Buffer | null = null;
-  let capture: CaptureStatus = {
-    frames: 0,
-    lastFrameAt: null,
-    source: null,
-    active: false,
-  };
+  const screens = new Map<string, { status: ScreenCapture; bytes: Buffer | null }>();
+  const screenDir = path.join(dataDir, "screens");
+  fs.mkdirSync(screenDir, { recursive: true });
+  const captureStatus = () => ({ screens: [...screens.values()].map(screen => screen.status) });
+  const saveStatus = () => fs.writeFileSync(path.join(dataDir, "status.json"), JSON.stringify(captureStatus(), null, 2));
   let voice = options.voice;
   const eventStreams = new Set<SSEReplyInterface>();
   const getVoice = () =>
     (voice ??= createVoice({
       cwd: appRoot,
-      getFrame: () =>
-        latest && capture.active
-          ? { bytes: latest, at: capture.lastFrameAt }
-          : null,
+      getFrames: () => [...screens.values()].flatMap(screen => screen.bytes
+        ? [{ id: screen.status.id, label: screen.status.label, bytes: screen.bytes, at: screen.status.lastFrameAt }]
+        : []),
     }));
   const app = Fastify({
     bodyLimit: 500_000,
@@ -92,7 +92,7 @@ export async function createApp(options: AppOptions = {}) {
     }
     if (
       request.method === "POST" &&
-      pathname === "/frame" &&
+      pathname === "/screens/:id/frame" &&
       request.headers["content-type"] !== "image/jpeg"
     ) {
       return reply.code(415).send({ error: "JPEG画像を送信してください" });
@@ -169,41 +169,50 @@ export async function createApp(options: AppOptions = {}) {
   app.get(
     "/status",
     { schema: { response: { 200: CaptureStatusSchema } } },
-    () => capture,
+    captureStatus,
   );
-  app.get("/latest.jpg", (_request, reply) => {
-    if (!latest || !capture.active) return reply.code(404).send();
-    return reply.type("image/jpeg").send(latest);
+  app.post("/screens", { schema: { body: ScreenStartSchema } }, (request, reply) => {
+    if (screens.has(request.body.id)) return reply.code(409).send({ error: "この画面はすでに共有されています" });
+    if (screens.size >= MAX_SHARED_SCREENS) return reply.code(409).send({ error: `同時に共有できる画面は${MAX_SHARED_SCREENS}つまでです` });
+    screens.set(request.body.id, { status: { ...request.body, frames: 0, lastFrameAt: null, source: null }, bytes: null });
+    saveStatus();
+    return { ok: true };
   });
-  app.post("/stop", async () => {
-    capture.active = false;
-    fs.writeFileSync(
-      path.join(dataDir, "status.json"),
-      JSON.stringify(capture, null, 2),
-    );
-    return "ok";
+  app.get("/screens/:id/latest.jpg", { schema: { params: ScreenParamsSchema } }, (request, reply) => {
+    const screen = screens.get(request.params.id);
+    if (!screen?.bytes) return reply.code(404).send();
+    return reply.type("image/jpeg").send(screen.bytes);
   });
-  app.post<{ Body: Buffer }>(
-    "/frame",
-    { bodyLimit: MAX_FRAME_BYTES },
+  app.post("/screens/:id/stop", { schema: { params: ScreenParamsSchema } }, (request) => {
+    screens.delete(request.params.id);
+    saveStatus();
+    return { ok: true };
+  });
+  app.post("/screens/stop", () => {
+    screens.clear();
+    saveStatus();
+    return { ok: true };
+  });
+  app.post<{ Body: Buffer; Params: { id: string } }>(
+    "/screens/:id/frame",
+    { bodyLimit: MAX_FRAME_BYTES, schema: { params: ScreenParamsSchema } },
     async (request, reply) => {
+      const screen = screens.get(request.params.id);
+      if (!screen) return reply.code(404).send();
       const bytes = request.body;
       if (!Buffer.isBuffer(bytes) || bytes[0] !== 255 || bytes[1] !== 216)
         return reply.code(400).send();
-      latest = bytes;
-      capture = {
-        frames: capture.frames + 1,
+      screen.bytes = bytes;
+      screen.status = {
+        ...screen.status,
+        frames: screen.status.frames + 1,
         lastFrameAt: new Date().toISOString(),
         source: String(
           request.headers["x-capture-source"] || "selected-window",
         ),
-        active: true,
       };
-      fs.writeFileSync(path.join(dataDir, "latest.jpg"), latest);
-      fs.writeFileSync(
-        path.join(dataDir, "status.json"),
-        JSON.stringify(capture, null, 2),
-      );
+      fs.writeFileSync(path.join(screenDir, `${screen.status.id}.jpg`), bytes);
+      saveStatus();
       return "ok";
     },
   );

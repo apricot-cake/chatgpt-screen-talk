@@ -23,11 +23,23 @@ export const VoiceStartSchema = Type.Object(
 );
 export type VoiceStartRequest = Static<typeof VoiceStartSchema>;
 
-export const CaptureStatusSchema = Type.Object({
+export const MAX_SHARED_SCREENS = 4;
+export const ScreenIdSchema = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
+export const ScreenParamsSchema = Type.Object({ id: ScreenIdSchema }, { additionalProperties: false });
+export const ScreenStartSchema = Type.Object({
+  id: ScreenIdSchema,
+  label: Type.String({ minLength: 1, maxLength: 80 }),
+}, { additionalProperties: false });
+export const ScreenCaptureSchema = Type.Object({
+  id: ScreenIdSchema,
+  label: Type.String(),
   frames: Type.Integer({ minimum: 0 }),
   lastFrameAt: Type.Union([Type.String(), Type.Null()]),
   source: Type.Union([Type.String(), Type.Null()]),
-  active: Type.Boolean(),
+});
+export type ScreenCapture = Static<typeof ScreenCaptureSchema>;
+export const CaptureStatusSchema = Type.Object({
+  screens: Type.Array(ScreenCaptureSchema, { maxItems: MAX_SHARED_SCREENS }),
 });
 export type CaptureStatus = Static<typeof CaptureStatusSchema>;
 

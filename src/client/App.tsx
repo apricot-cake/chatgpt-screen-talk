@@ -4,7 +4,6 @@ import {
   Monitor,
   MonitorOff,
   Phone,
-  RefreshCw,
   Volume2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,6 +27,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { useScreenShare } from "./hooks/useScreenShare";
+import { SharedScreenPreview } from "./components/SharedScreenPreview";
 import { useVoiceSession } from "./hooks/useVoiceSession";
 import { useVoiceChoices } from "./hooks/useVoiceChoices";
 import { VoicePicker } from "./components/VoicePicker";
@@ -41,15 +41,9 @@ export default function App() {
   const voiceSelection = useVoiceChoices();
   const screenIdle = screen.phase === "idle";
   const voiceIdle = voice.phase === "idle";
-  const screenWaiting = screen.phase === "selecting";
+  const screenWaiting = screen.isSelecting;
   const voiceWaiting = voice.phase === "connecting";
-  const screenAction = screenIdle
-    ? "画面を共有"
-    : screen.phase === "selecting"
-      ? "画面を選択中"
-      : screen.phase === "stopping"
-        ? "共有を停止中"
-        : "共有を停止";
+  const screenAction = screenWaiting ? "画面を選択中" : screen.screens.length ? "画面を追加" : "画面を共有";
   const voiceAction = voiceIdle
     ? "会話を開始"
     : voice.phase === "connecting"
@@ -59,9 +53,6 @@ export default function App() {
         : "会話を終了";
   const screenDetails = [
     screen.error ?? screen.message,
-    screen.lastFrameAt
-      ? `最終更新 ${new Date(screen.lastFrameAt).toLocaleTimeString("ja-JP")}`
-      : null,
     voice.lastScreenReadAt
       ? `AIが画面を参照しました ${new Date(voice.lastScreenReadAt).toLocaleTimeString("ja-JP")}`
       : null,
@@ -80,32 +71,27 @@ export default function App() {
             chatgpt-screen-talk
           </h1>
           <div className="flex shrink-0 items-center gap-2">
-            {screen.phase === "sharing" ? (
+            {screen.screens.length > 0 ? (
               <Button
                 variant="outline"
-                aria-label="共有画面を切り替え"
-                title="共有画面を切り替え"
-                onClick={() => void screen.switchShare()}
-                disabled={screen.isSwitching}
-                aria-busy={screen.isSwitching}
+                aria-label="すべての画面共有を停止"
+                title="すべての画面共有を停止"
+                onClick={() => void screen.stop()}
+                disabled={screen.phase === "stopping"}
               >
-                <RefreshCw data-icon="inline-start" />
-                <span className="hidden sm:inline">{screen.isSwitching ? "画面を選択中" : "画面を切り替え"}</span>
+                <MonitorOff data-icon="inline-start" />
+                <span className="hidden sm:inline">すべて停止</span>
               </Button>
             ) : null}
             <Button
-              variant={screenIdle || screenWaiting ? "default" : "destructive"}
+              variant="default"
               aria-label={screenAction}
               title={screenAction}
-              onClick={() => void (screenIdle ? screen.start() : screen.stop())}
-              disabled={screenWaiting || screen.phase === "stopping"}
+              onClick={() => void screen.start()}
+              disabled={screenWaiting || screen.phase === "stopping" || screen.screens.length >= screen.maxScreens}
               aria-busy={screenWaiting || screen.phase === "stopping"}
             >
-              {screenIdle || screenWaiting ? (
-                <Monitor data-icon="inline-start" />
-              ) : (
-                <MonitorOff data-icon="inline-start" />
-              )}
+              <Monitor data-icon="inline-start" />
               <span className="hidden sm:inline">{screenAction}</span>
             </Button>
             <Button
@@ -155,16 +141,13 @@ export default function App() {
               </CardTitle>
             </CardHeader>
             <CardContent className="screen-content flex flex-1 flex-col gap-4">
-              <div className="screen-preview relative flex aspect-video items-center justify-center overflow-hidden rounded-lg border bg-muted">
-                <video
-                  ref={screen.videoRef}
-                  autoPlay
-                  muted
-                  playsInline
-                  aria-label="共有画面のプレビュー"
-                  className="absolute inset-0 size-full object-contain"
-                />
-                {screen.phase !== "sharing" ? (
+              <p className="text-xs text-muted-foreground">共有中 {screen.screens.length} / {screen.maxScreens}画面 · 画面ごとに追加できます</p>
+              {screen.screens.length > 0 ? (
+                <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain">
+                  {screen.screens.map(shared => <SharedScreenPreview key={shared.id} screen={shared} onStop={screen.stopScreen} />)}
+                </div>
+              ) : (
+                <div className="screen-preview relative flex aspect-video items-center justify-center overflow-hidden rounded-lg border bg-muted">
                   <Empty className="relative">
                     <EmptyHeader>
                       <EmptyMedia variant="icon">
@@ -176,14 +159,8 @@ export default function App() {
                       </EmptyDescription>
                     </EmptyHeader>
                   </Empty>
-                ) : null}
-              </div>
-              {screen.lastFrameAt ? (
-                <p className="hidden text-xs text-muted-foreground md:block">
-                  最終更新{" "}
-                  {new Date(screen.lastFrameAt).toLocaleTimeString("ja-JP")}
-                </p>
-              ) : null}
+                </div>
+              )}
               {voice.lastScreenReadAt ? (
                 <p className="hidden text-xs text-muted-foreground md:block">
                   AIが画面を参照しました ·{" "}
