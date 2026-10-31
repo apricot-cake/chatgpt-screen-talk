@@ -409,6 +409,10 @@ export default function createVoice({
       state !== "stopping" &&
       state !== "stopped"
     ) {
+      if (!previewMode) {
+        lastError = "音声サービスとの接続が終了しました。会話をもう一度開始してください。";
+        emit({ type: "error", message: lastError });
+      }
       emit({ type: "closed", reason: cleanText(params.reason) });
       void stop();
     }

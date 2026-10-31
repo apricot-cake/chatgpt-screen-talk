@@ -219,7 +219,7 @@ export default function App() {
             </CardHeader>
             <CardContent className="conversation-content flex flex-col gap-4">
               <audio ref={voice.audioRef} autoPlay />
-              {voice.needsPlayback ? (
+              {voice.needsPlayback || voice.phase === "connected" ? (
                 <Button variant="outline" onClick={() => void voice.play()}>
                   <Volume2 data-icon="inline-start" />
                   返答音声を再生

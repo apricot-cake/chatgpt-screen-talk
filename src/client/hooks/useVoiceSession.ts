@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EventSource } from "eventsource";
 import { apiFetch } from "../lib/local-api";
+import { observeAudioPlayback } from "../lib/audio-playback";
 import type {
   VoiceDiagnostics,
   VoiceStartRequest,
@@ -53,6 +54,7 @@ export function useVoiceSession({ preview = false }: { preview?: boolean } = {})
     previewTimer: undefined as ReturnType<typeof setTimeout> | undefined,
     pendingStart: null as Promise<unknown> | null,
     closing: null as Promise<void> | null,
+    playback: null as ReturnType<typeof observeAudioPlayback> | null,
   });
   const captionId = useRef(0);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -64,6 +66,8 @@ export function useVoiceSession({ preview = false }: { preview?: boolean } = {})
   const release = useCallback(() => {
     const c = current.current;
     ++c.generation;
+    c.playback?.dispose();
+    c.playback = null;
     clearInterval(c.poll);
     clearTimeout(c.previewTimer);
     c.previewTimer = undefined;
@@ -115,19 +119,7 @@ export function useVoiceSession({ preview = false }: { preview?: boolean } = {})
     [release],
   );
   const play = useCallback(async () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const gen = current.current.generation;
-    try {
-      await audio.play();
-      if (mounted.current && gen === current.current.generation)
-        setNeedsPlayback(false);
-    } catch {
-      if (mounted.current && gen === current.current.generation) {
-        setNeedsPlayback(true);
-        setMessage("返答音声の再生ボタンを押してください。");
-      }
-    }
+    await current.current.playback?.resume();
   }, []);
   const start = useCallback(async (voice?: string) => {
     const c = current.current;
@@ -135,6 +127,12 @@ export function useVoiceSession({ preview = false }: { preview?: boolean } = {})
     c.phase = "connecting";
     const gen = ++c.generation;
     const valid = () => mounted.current && gen === c.generation;
+    const ended = (text: string) => {
+      if (!valid()) return;
+      setError(text);
+      setMessage(text);
+      void stop(true);
+    };
     setPhase("connecting");
     setError(null);
     setNeedsPlayback(false);
@@ -165,21 +163,37 @@ export function useVoiceSession({ preview = false }: { preview?: boolean } = {})
       c.mic = mic;
       const pc = new RTCPeerConnection();
       c.pc = pc;
-      mic.getAudioTracks().forEach((track) => pc.addTrack(track, mic));
+      mic.getAudioTracks().forEach((track) => {
+        pc.addTrack(track, mic);
+        track.onended = () => ended("マイク入力が終了しました。会話をもう一度開始してください。");
+      });
+      const audio = audioRef.current;
+      if (audio) c.playback = observeAudioPlayback(audio, {
+        isCurrent: valid,
+        onPlaying: () => {
+          setNeedsPlayback(false);
+          setMessage(previous => previous === "返答音声の再生ボタンを押してください。"
+            ? (preview ? "試聴しています。" : "接続しました。話しかけてください。")
+            : previous);
+        },
+        onBlocked: () => {
+          setNeedsPlayback(true);
+          setMessage("返答音声の再生ボタンを押してください。");
+        },
+      });
       pc.ontrack = (event) => {
         if (!valid()) return;
         const audio = audioRef.current;
         if (!audio) return;
         audio.srcObject = new MediaStream([event.track]);
-        void audio.play().catch(() => {
-          if (valid()) {
-            setNeedsPlayback(true);
-            setMessage("返答音声の再生ボタンを押してください。");
-          }
-        });
+        event.track.onended = () => ended("返答音声の受信が終了しました。会話をもう一度開始してください。");
+        event.track.onunmute = () => { if (valid() && audio.paused) void c.playback?.resume(); };
+        void c.playback?.resume();
       };
       const channel = pc.createDataChannel("oai-events");
       c.channel = channel;
+      channel.onclose = () => ended("音声接続が終了しました。会話をもう一度開始してください。");
+      channel.onerror = () => ended("音声接続で通信エラーが発生しました。会話をもう一度開始してください。");
       channel.onopen = () => {
         if (!preview || !valid()) return;
         c.previewTimer = setTimeout(() => { if (valid()) void stop(); }, 12_000);
@@ -322,7 +336,11 @@ export function useVoiceSession({ preview = false }: { preview?: boolean } = {})
             );
             setMessage("共有画面を確認しました。");
           }
-          if (value.type === "closed") void stop(true);
+          if (value.type === "closed") ended(
+            typeof value.reason === "string" && value.reason
+              ? `音声接続が終了しました（${value.reason}）。会話をもう一度開始してください。`
+              : "音声接続が終了しました。会話をもう一度開始してください。",
+          );
         } catch {}
       };
       await pc.setLocalDescription(await pc.createOffer());

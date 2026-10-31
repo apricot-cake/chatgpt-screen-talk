@@ -21,6 +21,7 @@ function record(value: unknown): JsonRecord {
 }
 
 interface MockOptions {
+  closeAfterStart?: boolean;
   accountType?: string;
   unsupportedOptionalFields?: boolean;
   stateRuntimeFailure?: boolean;
@@ -149,6 +150,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     result({});
     send({ method: "thread/realtime/started", params: { threadId: "test-thread", version: "v3" } });
     send({ method: "thread/realtime/sdp", params: { sdp: "v=0\\r\\ns=mock-answer\\r\\n" } });
+    if (options.closeAfterStart) setTimeout(() => send({ method: "thread/realtime/closed", params: { threadId: "test-thread", reason: "transport_closed" } }), 100);
     send({ id: "screen-request", method: "item/tool/call", params: { namespace: options.toolNamespace === undefined ? "shared_screen" : options.toolNamespace, tool: options.toolName || "get_shared_screen", arguments: {} } });
   } else if (message.method === "thread/realtime/appendSpeech") {
     result({});
@@ -552,4 +554,17 @@ test("停止したセッションの画像を再接続した別セッション�
     assert.equal(replies.length, 1);
     assert.doesNotMatch(JSON.stringify(replies), /UFJJVkFURV9PTERfRlJBTUU=/);
   }, () => ++frameCalls === 1 ? oldFrame : { bytes: Buffer.from([255, 216, 255, 217]), at: "new" });
+});
+
+test("音声サービスが接続を閉じた場合は再開方法を通知して停止する", { concurrency: false }, async () => {
+  await withMock({ closeAfterStart: true }, async (voice) => {
+    const events: VoiceEvent[] = [];
+    voice.subscribe(event => events.push(event));
+    await voice.start("v=0\r\n");
+    const deadline = Date.now() + 3000;
+    while (voice.status().state !== "stopped" && Date.now() < deadline) await delay(20);
+    assert.equal(voice.status().state, "stopped");
+    assert.ok(events.some(event => event.type === "error" && /もう一度開始/.test(event.message)));
+    assert.ok(events.some(event => event.type === "closed"));
+  });
 });
