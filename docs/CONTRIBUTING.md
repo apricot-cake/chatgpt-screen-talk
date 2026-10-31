@@ -42,11 +42,15 @@ Codexの実行ファイルやポート番号を指定する方法は、[設定](
 
 画面共有と音声会話は同じページで使います。それぞれ個別に開始・停止できます。以前の音声ページ `/voice` と `/voice.html` へのアクセスは、現在のページ `/` にリダイレクトします。
 
+共有画面はUUIDで識別し、最大4画面を保持します。`POST /screens` で登録し、`/screens/:id/frame` で画像を更新します。画像取得は `/screens/:id/latest.jpg`、個別停止は `/screens/:id/stop`、全停止は `/screens/stop` です。`GET /status` は共有中の画面一覧を返します。停止後の遅延送信は拒否し、他の画面の画像を更新しません。
+
 起動用の `scripts/start.mjs` は、依存パッケージを導入する前にも動くよう、Node.jsで直接実行できるJavaScriptで記述しています。`package-lock.json` とソースの変更を確認し、必要な場合だけ依存パッケージの導入とビルドを行います。
 
 ### 音声セッションの権限
 
 このアプリが提供するツールは、共有画像を取得する `shared_screen.get_shared_screen` です。通常の会話では、これに加えてCodex標準のウェブ検索を有効にします。最新の情報が必要な質問はCodexへ委譲して検索し、検索結果の文章も指示ではなく資料として扱います。コマンド実行などの操作機能、MCP、通知コマンドは無効にします。
+
+画像取得ツールは、共有中の各画面の識別名と画像をまとめて返します。画像確認の前置きは発話せず、結果への回答から話すよう指示しています。
 
 Code Mode専用のモデルでもツールを使えるよう、`features.code_mode.enabled=false` を保ち、`direct_only_tool_namespaces` に `shared_screen` と `web` を指定します。ウェブ検索は `web_search="live"` と `features.standalone_web_search=true` で有効にし、独自の検索ツールは追加しません。接続前にこの設定の完全一致を確認し、共有画像の取得要求を受け取る際も名前空間とツール名を照合します。
 
