@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import {
   ChevronRight,
   Mic,
@@ -33,6 +32,7 @@ import { useVoiceSession } from "./hooks/useVoiceSession";
 import { useVoiceChoices } from "./hooks/useVoiceChoices";
 import { VoicePicker } from "./components/VoicePicker";
 import { ConnectionStatus } from "./components/ConnectionStatus";
+import { Transcript } from "./components/Transcript";
 
 export default function App() {
   const screen = useScreenShare();
@@ -68,20 +68,6 @@ export default function App() {
   ]
     .filter(Boolean)
     .join(" / ");
-  const transcript = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const node = transcript.current;
-    if (!node) return;
-    const observer = new ResizeObserver(() => {
-      node.scrollTop = node.scrollHeight;
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-  useEffect(() => {
-    const node = transcript.current;
-    if (node) node.scrollTop = node.scrollHeight;
-  }, [voice.captions]);
 
   return (
     <div className="app-shell min-h-svh bg-background text-foreground">
@@ -240,39 +226,7 @@ export default function App() {
                 </Button>
               ) : null}
               <Separator />
-              <div
-                ref={transcript}
-                role="log"
-                aria-label="会話の文字起こし"
-                aria-live="polite"
-                tabIndex={0}
-                className="transcript flex h-[50svh] min-h-64 flex-col gap-6 overflow-y-auto overscroll-contain rounded-md p-1"
-              >
-                {voice.captions.length === 0 ? (
-                  <Empty className="h-full">
-                    <EmptyHeader>
-                      <EmptyMedia variant="icon">
-                        <Mic />
-                      </EmptyMedia>
-                      <EmptyTitle>声で質問してみましょう</EmptyTitle>
-                      <EmptyDescription>
-                        話した内容がここに表示されます。
-                      </EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                ) : (
-                  voice.captions.map((caption) => (
-                    <article key={caption.id} className="flex flex-col gap-2">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        {caption.role === "user" ? "あなた" : "AI"}
-                      </p>
-                      <p className="whitespace-pre-wrap break-words text-sm leading-7">
-                        {caption.text}
-                      </p>
-                    </article>
-                  ))
-                )}
-              </div>
+              <Transcript captions={voice.captions} />
             </CardContent>
           </Card>
         </section>
